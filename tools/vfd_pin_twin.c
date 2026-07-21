@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include "vfd_scan.h"
 
 enum TwinEvent {
@@ -70,6 +75,14 @@ int main(void)
     uint8_t scan_frame[VFD_SCAN_FRAME_BYTES];
     VfdScanState state;
     TwinPins pins = {stdout, false};
+
+#ifdef _WIN32
+    if (_setmode(_fileno(stdin), _O_BINARY) == -1 ||
+        _setmode(_fileno(stdout), _O_BINARY) == -1) {
+        fputs("failed to configure binary standard streams\n", stderr);
+        return 1;
+    }
+#endif
 
     if (!twin_read_frame(framebuffer)) {
         fputs("expected exactly one 512-byte MVLSB frame on stdin\n", stderr);

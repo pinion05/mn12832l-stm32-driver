@@ -2,6 +2,11 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include "vfd_host_link.h"
 
 int main(void)
@@ -9,6 +14,14 @@ int main(void)
     VfdHostLink link;
     uint8_t ack[VFD_HOST_ACK_PACKET_BYTES];
     int input;
+
+#ifdef _WIN32
+    if (_setmode(_fileno(stdin), _O_BINARY) == -1 ||
+        _setmode(_fileno(stdout), _O_BINARY) == -1) {
+        fputs("failed to configure binary standard streams\n", stderr);
+        return 4;
+    }
+#endif
 
     vfd_host_link_init(&link, NULL);
     while ((input = getchar()) != EOF) {

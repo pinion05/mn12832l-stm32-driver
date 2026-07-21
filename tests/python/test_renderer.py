@@ -35,7 +35,7 @@ class RendererTests(unittest.TestCase):
             lambda model, fb: fb.pixel(model["x"], model["y"], 1),
         )
 
-        self.assertEqual(frame[0], 0)
+        self.assertEqual(frame[1], 0)
         self.assertEqual(frame[128 + 10], 0x02)
 
     def test_pillow_mode_one_image_is_packed_without_custom_converter(self) -> None:

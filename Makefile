@@ -126,7 +126,7 @@ warnings-board:
 		$(HOST_CC) $(TARGET_CPPFLAGS) $(STRICT_CFLAGS) -fsyntax-only "$$source" || exit; \
 	done
 
-warnings-tools: $(BUILD_DIR)/vfd_pin_twin
+warnings-tools:
 	$(HOST_CC) $(HOST_CPPFLAGS) $(STRICT_CFLAGS) -fsyntax-only \
 		tools/vfd_pin_twin.c
 
