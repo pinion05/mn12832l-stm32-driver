@@ -1,7 +1,7 @@
 /**
   ******************************************************************************
   * @file    stm32f0xx_it.c
-  * @brief   Interrupt Service Routines.
+  * @brief   Hardened STM32F0 interrupt/MSP support.
   ******************************************************************************
   *
   * COPYRIGHT(c) 2018 STMicroelectronics
@@ -30,118 +30,44 @@
   *
   ******************************************************************************
   */
-/* Includes ------------------------------------------------------------------*/
-#include "stm32f0xx_hal.h"
-#include "stm32f0xx.h"
+#include "main.h"
 #include "stm32f0xx_it.h"
 
-/* USER CODE BEGIN 0 */
-
-/* USER CODE END 0 */
-
-/* External variables --------------------------------------------------------*/
 extern TIM_HandleTypeDef htim14;
-extern uint8_t ResetSCAN;
+extern volatile uint8_t vfd_scan_due;
 
-/******************************************************************************/
-/*            Cortex-M0 Processor Interruption and Exception Handlers         */ 
-/******************************************************************************/
-
-/**
-* @brief This function handles Non maskable interrupt.
-*/
 void NMI_Handler(void)
 {
-  /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
-
-  /* USER CODE END NonMaskableInt_IRQn 0 */
-  /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
-
-  /* USER CODE END NonMaskableInt_IRQn 1 */
+    VFD_SafeShutdown();
+    while (1) {
+        __NOP();
+    }
 }
 
-/**
-* @brief This function handles Hard fault interrupt.
-*/
 void HardFault_Handler(void)
 {
-  /* USER CODE BEGIN HardFault_IRQn 0 */
-
-  /* USER CODE END HardFault_IRQn 0 */
-  while (1)
-  {
-  }
-  /* USER CODE BEGIN HardFault_IRQn 1 */
-
-  /* USER CODE END HardFault_IRQn 1 */
+    VFD_SafeShutdown();
+    while (1) {
+        __NOP();
+    }
 }
 
-/**
-* @brief This function handles System service call via SWI instruction.
-*/
 void SVC_Handler(void)
 {
-  /* USER CODE BEGIN SVC_IRQn 0 */
-
-  /* USER CODE END SVC_IRQn 0 */
-  /* USER CODE BEGIN SVC_IRQn 1 */
-
-  /* USER CODE END SVC_IRQn 1 */
 }
 
-/**
-* @brief This function handles Pendable request for system service.
-*/
 void PendSV_Handler(void)
 {
-  /* USER CODE BEGIN PendSV_IRQn 0 */
-
-  /* USER CODE END PendSV_IRQn 0 */
-  /* USER CODE BEGIN PendSV_IRQn 1 */
-
-  /* USER CODE END PendSV_IRQn 1 */
 }
 
-/**
-* @brief This function handles System tick timer.
-*/
 void SysTick_Handler(void)
 {
-  /* USER CODE BEGIN SysTick_IRQn 0 */
-
-  /* USER CODE END SysTick_IRQn 0 */
-  HAL_IncTick();
-  HAL_SYSTICK_IRQHandler();
-  /* USER CODE BEGIN SysTick_IRQn 1 */
-
-  /* USER CODE END SysTick_IRQn 1 */
+    HAL_IncTick();
+    HAL_SYSTICK_IRQHandler();
 }
 
-/******************************************************************************/
-/* STM32F0xx Peripheral Interrupt Handlers                                    */
-/* Add here the Interrupt Handlers for the used peripherals.                  */
-/* For the available peripheral interrupt handler names,                      */
-/* please refer to the startup file (startup_stm32f0xx.s).                    */
-/******************************************************************************/
-
-/**
-* @brief This function handles TIM14 global interrupt.
-*/
 void TIM14_IRQHandler(void)
 {
-  /* USER CODE BEGIN TIM14_IRQn 0 */
-
-  /* USER CODE END TIM14_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim14);
-                              
-    
-  ResetSCAN = 1;
-//  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_3);
-//  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_3);
-//  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_3);
+    HAL_TIM_IRQHandler(&htim14);
+    vfd_scan_due = 1u;
 }
-
-/* USER CODE BEGIN 1 */
-
-/* USER CODE END 1 */
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

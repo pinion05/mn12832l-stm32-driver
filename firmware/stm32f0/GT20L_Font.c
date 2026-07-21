@@ -1,214 +1,97 @@
-#include "GT20L_Font.h"  
+#include "GT20L_Font.h"
 
+#include <stdbool.h>
+#include <stddef.h>
 
-
-  
-
-
-    
-// 将字体30字节置入显存data
-// x:0-127, y: 0-32
-void  PutFont15x16ToBuff(uint8_t x, uint8_t y, uint8_t* fontHZ)
+static bool blit_is_valid(uint8_t x, uint8_t y, const uint8_t *font)
 {
-    // y: 1-7 需要移位存到B0，B1，B2三个
-    // y: 9-15,需要移位存到B1，B2，B3
-    // y：0或者16，直接存B0、B1或者B2、B3
-    // y>16，存不下，是否需要循环存放？超出的部分，移位存入B0 大于24时还要存入B1
-    uint8_t brow = y;
-    
-    uint8_t offset;
-    
-    // 假设目标位置为（0，2）-（0,18），B0计算= 2/8 = 0;
-    uint8_t beginBrow = y /8;
-    uint8_t B0, B1, B2;   // 字库新的位置。B0对应 data[beginBrow][x], B1=data[beginBrow+1][0], B2=data[beginBrow+2][0];
-    
-    offset = y % 8;
-    if(offset)   // 非整数行时，移位
-    {
-        for (int i = 0; i < 30; i+=2)
-        {                
-            if(x>127)  
-                continue;
-            // 字体需要向高位移动y次
-            B0 = fontHZ[i] << offset;         
-            B1 = (fontHZ[i] >> (8-offset))  |  ( fontHZ[i+1] << offset);
-            B2 = (fontHZ[i+1] >> (8-offset));
-            
-            data[beginBrow][x] |=B0;
-                                    
-            // 超出部分隐藏
-            if( beginBrow < 3)
-                data[beginBrow+1][x] |=B1;  
-            if( beginBrow < 2)
-                data[beginBrow+2][x] |=B2;
-            
-            x++;
-        }
-    }else{     // 整数行，直接输出到对应字节
-        for (int i = 0; i < 30; i+=2)
-        {
-            if(x>127)  // 超出部分隐藏
-                continue;
-            
-            data[beginBrow][x] = fontHZ[i];  
-            if( beginBrow < 3)
-                data[beginBrow+1][x] = fontHZ[i+1];
-            x++;
-        }
-    }
-}   
-void  PutFont8x16ToBuff(uint8_t x, uint8_t y, uint8_t* fontHZ)
+    return font != NULL && x < VFD_FONT_BUFFER_WIDTH &&
+           y < VFD_FONT_BUFFER_PAGES * 8u;
+}
+
+static void blit_8px_columns(
+    uint8_t x,
+    uint8_t y,
+    const uint8_t *font,
+    size_t width,
+    bool suppress_offset_one_spill)
 {
-    // y: 1-7 需要移位存到B0，B1，B2三个
-    // y: 9-15,需要移位存到B1，B2，B3
-    // y：0或者16，直接存B0、B1或者B2、B3
-    // y>16，存不下，是否需要循环存放？超出的部分，移位存入B0 大于24时还要存入B1
-    uint8_t brow = y;
-    
-    uint8_t offset;
-    
-    // 假设目标位置为（0，2）-（0,18），B0计算= 2/8 = 0;
-    uint8_t beginBrow = y /8;
-    uint8_t B0, B1, B2;   // 字库新的位置。B0对应 data[beginBrow][x], B1=data[beginBrow+1][0], B2=data[beginBrow+2][0];
-    
-    offset = y % 8;
-    if(offset)   // 非整数行时，移位
-    {
-        for (int i = 0; i < 16; i+=2)
-        {                
-            if(x>127)  
-                continue;
-            // 字体需要向高位移动y次
-            B0 = fontHZ[i] << offset;         
-            B1 = (fontHZ[i] >> (8-offset))  |  ( fontHZ[i+1] << offset);
-            B2 = (fontHZ[i+1] >> (8-offset));
-            
-            data[beginBrow][x] |=B0;
-                                    
-            // 超出部分隐藏
-            if( beginBrow < 3)
-                data[beginBrow+1][x] |=B1;  
-            if( beginBrow < 2)
-                data[beginBrow+2][x] |=B2;
-            
-            x++;
+    if (!blit_is_valid(x, y, font)) {
+        return;
+    }
+
+    const size_t first_page = y / 8u;
+    const uint8_t offset = (uint8_t)(y % 8u);
+
+    for (size_t column = 0; column < width && x < VFD_FONT_BUFFER_WIDTH;
+         ++column, ++x) {
+        if (offset == 0u) {
+            data[first_page][x] = font[column];
+            continue;
         }
-    }else{     // 整数行，直接输出到对应字节
-        for (int i = 0; i < 16; i+=2)
-        {
-            if(x>127)  // 超出部分隐藏
-                continue;
-            
-            data[beginBrow][x] = fontHZ[i];  
-            if( beginBrow < 3)
-                data[beginBrow+1][x] = fontHZ[i+1];
-            x++;
+
+        data[first_page][x] |= (uint8_t)(font[column] << offset);
+        if (first_page + 1u < VFD_FONT_BUFFER_PAGES &&
+            !(suppress_offset_one_spill && offset == 1u)) {
+            data[first_page + 1u][x] |=
+                (uint8_t)(font[column] >> (8u - offset));
         }
     }
-}     
-void  PutFont7x8ToBuff(uint8_t x, uint8_t y, uint8_t* font)
+}
+
+static void blit_16px_columns(
+    uint8_t x,
+    uint8_t y,
+    const uint8_t *font,
+    size_t width)
 {
-    // y: 1-7 需要移位存到B0，B1，B2三个
-    // y: 9-15,需要移位存到B1，B2，B3
-    // y：0或者16，直接存B0、B1或者B2、B3
-    // y>16，存不下，是否需要循环存放？超出的部分，移位存入B0 大于24时还要存入B1
-    uint8_t brow = y;
-    
-    uint8_t offset;
-    
-    // 假设目标位置为（0，2）-（0,18），B0计算= 2/8 = 0;
-    uint8_t beginBrow = y /8;
-    uint8_t B0, B1, B2;   // 字库新的位置。B0对应 data[beginBrow][x], B1=data[beginBrow+1][0], B2=data[beginBrow+2][0];
-    
-    offset = y % 8;
-    if(offset)   // 非整数行时，移位
-    {
-        for (int i = 0; i < 7; i++)
-        {                
-            if(x>127)  
-                continue;
-            // 字体需要向高位移动y次
-            B0 = font[i] << offset;         
-            B1 = font[i] >> (8-offset);
-            
-            data[beginBrow][x] |=B0;
-                                    
-            // 超出部分隐藏
-            if( beginBrow < 3)
-                data[beginBrow+1][x] |=B1;  
-            
-            x++;
+    if (!blit_is_valid(x, y, font)) {
+        return;
+    }
+
+    const size_t first_page = y / 8u;
+    const uint8_t offset = (uint8_t)(y % 8u);
+
+    for (size_t column = 0; column < width && x < VFD_FONT_BUFFER_WIDTH;
+         ++column, ++x) {
+        const uint8_t upper = font[column * 2u];
+        const uint8_t lower = font[column * 2u + 1u];
+
+        if (offset == 0u) {
+            data[first_page][x] = upper;
+            if (first_page + 1u < VFD_FONT_BUFFER_PAGES) {
+                data[first_page + 1u][x] = lower;
+            }
+            continue;
         }
-    }else{     // 整数行，直接输出到对应字节
-        for (int i = 0; i < 7; i++)
-        {
-            if(x>127)  // 超出部分隐藏
-                continue;
-            
-            data[beginBrow][x] = font[i];  
-            x++;
+
+        data[first_page][x] |= (uint8_t)(upper << offset);
+        if (first_page + 1u < VFD_FONT_BUFFER_PAGES) {
+            data[first_page + 1u][x] |=
+                (uint8_t)((upper >> (8u - offset)) | (lower << offset));
+        }
+        if (first_page + 2u < VFD_FONT_BUFFER_PAGES) {
+            data[first_page + 2u][x] |= (uint8_t)(lower >> (8u - offset));
         }
     }
-}   
-void  PutFont5x7ToBuff(uint8_t x, uint8_t y, uint8_t* font)
+}
+
+void PutFont15x16ToBuff(uint8_t x, uint8_t y, const uint8_t *font)
 {
-    // 5x7字体，高度7，
-    // y=0时，直接放，y=1时，左移1位。y=2时，左移2位，跨2个字节。y=3，左移3位，跨2个字节。
-    // y=8时，直接放，y=9时，左移1位
-    uint8_t offset;  // 根据y是否是大行起始位置，决定是否移位。若y %8 >1, 跨2个大行
-    
-    // 假设目标位置为（0，2）-（0,18），B0计算= 2/8 = 0;
-    uint8_t beginBrow = y /8;
-    uint8_t B0, B1, B2;   // 字库新的位置。B0对应 data[beginBrow][x], B1=data[beginBrow+1][0], B2=data[beginBrow+2][0];
-    
-    offset = y % 8;  // 
-    
-    
-    if(offset == 0)
-    {   
-        // 整数行，直接输出到对应字节
-        for (int i = 0; i < 5; i++)
-        {
-            if(x>127)  // 超出部分隐藏
-                continue;
-            
-            data[beginBrow][x] = font[i];  
-            x++;
-        }
-        
-    }
-    else if(offset == 1)     // 一个大行完成
-    {
-        for (int i = 0; i < 5; i++)
-        {                
-            if(x>127)  
-                continue;
-            
-            // 字体需要向高位移动y次
-            B0 = font[i] << 1; 
-            data[beginBrow][x] |=B0;
-            
-            x++;
-        }
-    }
-    else   // 跨2个大行
-    {  
-        for (int i = 0; i < 5; i++)
-        {                
-            if(x>127)  
-                continue;
-            
-            // 字体需要向高位移动y次
-            B0 = font[i] << offset;         
-            B1 = font[i] >> (8-offset);
-            
-            data[beginBrow][x] |=B0;
-                                    
-            // 超出部分隐藏
-            if( beginBrow < 3)
-                data[beginBrow+1][x] |=B1;  
-            
-            x++;
-        }
-    }
+    blit_16px_columns(x, y, font, 15u);
+}
+
+void PutFont8x16ToBuff(uint8_t x, uint8_t y, const uint8_t *font)
+{
+    blit_16px_columns(x, y, font, 8u);
+}
+
+void PutFont7x8ToBuff(uint8_t x, uint8_t y, const uint8_t *font)
+{
+    blit_8px_columns(x, y, font, 7u, false);
+}
+
+void PutFont5x7ToBuff(uint8_t x, uint8_t y, const uint8_t *font)
+{
+    blit_8px_columns(x, y, font, 5u, true);
 }

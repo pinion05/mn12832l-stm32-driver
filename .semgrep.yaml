@@ -1,0 +1,49 @@
+rules:
+  - id: unsafe-c-string-copy
+    message: Use a bounds-checked operation instead of an unbounded C string API.
+    severity: ERROR
+    languages: [c]
+    pattern-either:
+      - pattern: strcpy(...)
+      - pattern: strcat(...)
+      - pattern: sprintf(...)
+      - pattern: gets(...)
+
+  - id: unsupported-font-rom-spi-path
+    message: The incomplete external font-ROM SPI path must stay quarantined.
+    severity: ERROR
+    languages: [c]
+    paths:
+      include:
+        - /firmware/stm32f0/*.c
+    pattern-either:
+      - pattern: HAL_SPI_Transmit(...)
+      - pattern: HAL_SPI_Receive(...)
+
+  - id: nonvolatile-vfd-scan-event
+    message: The timer/main shared scan event must be volatile.
+    severity: ERROR
+    languages: [c]
+    paths:
+      include:
+        - /firmware/stm32f0/*.c
+    patterns:
+      - pattern: uint8_t vfd_scan_due;
+      - pattern-not: volatile uint8_t vfd_scan_due;
+      - pattern-not: extern volatile uint8_t vfd_scan_due;
+
+  - id: empty-c-delay-loop
+    message: Empty delay loops disappear under optimization; use vfd_delay instead.
+    severity: ERROR
+    languages: [c]
+    pattern-either:
+      - pattern: while ($CONDITION) {}
+      - pattern: for ($INIT; $CONDITION; $UPDATE) {}
+
+  - id: python-dynamic-code-execution
+    message: Avoid dynamic code execution in verification scripts.
+    severity: ERROR
+    languages: [python]
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)

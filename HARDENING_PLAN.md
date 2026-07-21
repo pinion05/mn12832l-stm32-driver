@@ -22,6 +22,17 @@ supplied hardware scan order and explicitly separating unsupported/orphan code.
 - Host regression tests for scan packing and font clipping.
 - Warning-clean host builds and Clang static analysis.
 
+## Implemented verification gates
+
+- UBSan regression tests for aligned, unaligned, and clipped font blits.
+- Exhaustive scan lane properties for all 43 phases and 32 rows.
+- Tested MSB-first 240-bit emitter with the pixel/grid boundary hook.
+- Tested scan-phase/HV pulse state and phase-43 partial-column behavior.
+- Fake-HAL `-Werror` compilation for `main.c`, ISR, and MSP glue.
+- Cortex-M0 `-O2` assembly inspection for non-elided delay loops.
+- Source contracts for IRQ handoff, fail-safe pin preload, and fault shutdown.
+- Clang analyzer plus Qlty/Semgrep/TruffleHog checks.
+
 ## Out of scope without hardware evidence
 
 - Changing HV/EF duty cycle or polarity.
