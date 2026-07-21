@@ -8,6 +8,11 @@ is fingerprinted by `ORIGINAL_SHA256SUMS.txt`.
 See [`ANALYSIS.md`](ANALYSIS.md) for the Korean protocol, defect, and residual-risk
 report.
 
+Beginner-friendly visual report:
+
+- [`reports/mn12832l-improvement-report.html`](reports/mn12832l-improvement-report.html)
+- [`reports/mn12832l-improvement-report.pdf`](reports/mn12832l-improvement-report.pdf)
+
 ## Status
 
 **Host-verified driver core; not yet hardware-qualified firmware.**
