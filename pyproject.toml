@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mn12832l-vfd"
+version = "1.1.0"
+description = "Raspberry Pi host stack for an STM32-driven MN12832L 128x32 VFD"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "adafruit-circuitpython-framebuf>=1.0.0",
+  "Pillow>=9.0",
+]
+
+[project.optional-dependencies]
+serial = ["pyserial>=3.5"]
+
+[project.scripts]
+mn12832l-serial-bridge = "mn12832l.serial_bridge:main"
+mn12832l-twin = "mn12832l.twin:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

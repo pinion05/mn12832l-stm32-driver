@@ -77,6 +77,26 @@ def main() -> int:
         "vfd_latch_previous_frame(false)",
         "vfd_ef_enable()",
     )
+    require_in_order(
+        main_body,
+        "render_supplied_demo()",
+        "vfd_host_link_init(&vfd_host_link, data)",
+        "vfd_scan_pack_step(vfd_host_link_front(&vfd_host_link)",
+    )
+    require_in_order(
+        main_body,
+        "vfd_scan_state_advance(&scan_state)",
+        "scan_state.phase == 1u",
+        "vfd_host_link_swap_if_pending(&vfd_host_link, NULL)",
+        "vfd_scan_pack_step(vfd_host_link_front(&vfd_host_link)",
+    )
+
+    host_byte_body = function_body(board, "VFD_HostProcessByte")
+    require_in_order(
+        host_byte_body,
+        "vfd_host_ready",
+        "vfd_host_link_feed(&vfd_host_link, byte, ack_out)",
+    )
 
     if "VFD_SafeShutdown()" not in function_body(board, "_Error_Handler"):
         raise AssertionError("error handler lacks fail-safe shutdown")
