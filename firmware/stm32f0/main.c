@@ -7,6 +7,7 @@
 #include "GT20L_Font.h"
 #include "demo_fonts.h"
 #include "vfd_delay.h"
+#include "vfd_host_link.h"
 #include "vfd_scan.h"
 
 #define VFD_SIN_PIN GPIO_PIN_1
@@ -20,6 +21,8 @@ TIM_HandleTypeDef htim14;
 volatile uint8_t vfd_scan_due;
 
 static volatile bool vfd_gpio_ready;
+static VfdHostLink vfd_host_link;
+static bool vfd_host_ready;
 
 static void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
@@ -112,6 +115,15 @@ static bool vfd_scan_event_take(void)
     return due;
 }
 
+bool VFD_HostProcessByte(
+    uint8_t byte, uint8_t ack_out[VFD_HOST_ACK_PACKET_BYTES])
+{
+    if (!vfd_host_ready || ack_out == NULL) {
+        return false;
+    }
+    return vfd_host_link_feed(&vfd_host_link, byte, ack_out);
+}
+
 static void vfd_write_scan_bit(bool bit, void *context)
 {
     (void)context;
@@ -180,12 +192,15 @@ int main(void)
 
     HAL_Delay(20u);
     render_supplied_demo();
+    vfd_host_link_init(&vfd_host_link, data);
+    vfd_host_ready = true;
 
     vfd_ef_enable();
     HAL_Delay(20u);
 
     vfd_scan_state_init(&scan_state);
-    if (!vfd_scan_pack_step(data, scan_state.phase, scan_frame)) {
+    if (!vfd_scan_pack_step(vfd_host_link_front(&vfd_host_link),
+                            scan_state.phase, scan_frame)) {
         _Error_Handler(__FILE__, (uint32_t)__LINE__);
     }
     if (HAL_TIM_Base_Start_IT(&htim14) != HAL_OK) {
@@ -205,13 +220,17 @@ int main(void)
         }
 
         vfd_scan_state_advance(&scan_state);
+        if (scan_state.phase == 1u) {
+            (void)vfd_host_link_swap_if_pending(&vfd_host_link, NULL);
+        }
         if (scan_state.hv_enabled) {
             vfd_hv_enable();
         } else {
             vfd_hv_disable();
         }
 
-        if (!vfd_scan_pack_step(data, scan_state.phase, scan_frame)) {
+        if (!vfd_scan_pack_step(vfd_host_link_front(&vfd_host_link),
+                                scan_state.phase, scan_frame)) {
             _Error_Handler(__FILE__, (uint32_t)__LINE__);
         }
     }

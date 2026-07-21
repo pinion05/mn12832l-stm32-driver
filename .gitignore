@@ -1,3 +1,5 @@
 /build/
 /*.plist
 __pycache__/
+.venv/
+*.egg-info/
