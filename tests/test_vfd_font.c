@@ -79,6 +79,51 @@ static void test_bottom_edge_clipping(void)
     }
 }
 
+static void test_valid_7x8_blit(void)
+{
+    const uint8_t glyph[7] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40};
+
+    memset(data, 0, sizeof(data));
+    PutFont7x8ToBuff(3, 3, (uint8_t *)glyph);
+
+    for (size_t x = 0; x < 7; ++x) {
+        CHECK(data[0][3 + x] == (uint8_t)(glyph[x] << 3));
+        CHECK(data[1][3 + x] == (uint8_t)(glyph[x] >> 5));
+    }
+}
+
+static void test_valid_8x16_blit(void)
+{
+    const uint8_t glyph[16] = {
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+        0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+    };
+
+    memset(data, 0, sizeof(data));
+    PutFont8x16ToBuff(4, 8, (uint8_t *)glyph);
+
+    for (size_t column = 0; column < 8; ++column) {
+        CHECK(data[1][4 + column] == glyph[column * 2]);
+        CHECK(data[2][4 + column] == glyph[column * 2 + 1]);
+    }
+}
+
+static void test_valid_15x16_blit(void)
+{
+    uint8_t glyph[30];
+    for (size_t byte = 0; byte < sizeof(glyph); ++byte) {
+        glyph[byte] = (uint8_t)(byte + 1);
+    }
+
+    memset(data, 0, sizeof(data));
+    PutFont15x16ToBuff(120, 16, glyph);
+
+    for (size_t column = 0; column < 8; ++column) {
+        CHECK(data[2][120 + column] == glyph[column * 2]);
+        CHECK(data[3][120 + column] == glyph[column * 2 + 1]);
+    }
+}
+
 static void test_out_of_range_is_noop(void)
 {
     const uint8_t glyph[5] = {0xff, 0xff, 0xff, 0xff, 0xff};
@@ -102,6 +147,9 @@ int main(int argc, char **argv)
     test_valid_unaligned_5x7_blit();
     test_right_edge_clipping();
     test_bottom_edge_clipping();
+    test_valid_7x8_blit();
+    test_valid_8x16_blit();
+    test_valid_15x16_blit();
 
     if (!characterization_only) {
         test_out_of_range_is_noop();
