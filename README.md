@@ -77,6 +77,10 @@ make twin PYTHON=.venv/bin/python \
   TWIN_ARGS='--border-loader --compact --frames 160 --fps 20'
 ```
 
+The loader rasterizes the packaged `assets/loading_wordmark.txt` ASCII art,
+adds a wrapped scan bar and border comet, then verifies every animated frame
+through the C pin twin before drawing it.
+
 A successful run reports `DIGITAL TWIN: PASS`, 43 phases, 10,320 rising clock
 edges, 43 latches, 43 pixel/grid gaps, and safe final control-pin levels. See
 [`docs/DIGITAL_TWIN.md`](docs/DIGITAL_TWIN.md) for the interface and limitations.

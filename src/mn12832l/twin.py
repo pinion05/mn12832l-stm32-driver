@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib import resources
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
@@ -22,6 +24,7 @@ PIXEL_BITS_PER_PHASE = 192
 GRID_BITS_PER_PHASE = 48
 BITS_PER_PHASE = PIXEL_BITS_PER_PHASE + GRID_BITS_PER_PHASE
 BORDER_PERIMETER_PIXELS = 2 * (FRAME_WIDTH + FRAME_HEIGHT) - 4
+DEFAULT_ASCII_ART_ASSET = "loading_wordmark.txt"
 
 EVENT_PHASE = 1
 EVENT_SIN = 2
@@ -422,12 +425,78 @@ def border_loader_position(step: int) -> Tuple[int, int]:
     return 0, FRAME_HEIGHT - 2 - position
 
 
+@lru_cache(maxsize=8)
+def load_ascii_art_asset(
+    name: str = DEFAULT_ASCII_ART_ASSET,
+) -> Tuple[str, ...]:
+    """Load and validate a packaged ``#``/``.`` monochrome art asset."""
+
+    if not name or Path(name).name != name:
+        raise ValueError("ASCII art asset name must be a plain file name")
+    asset_path = resources.files(__package__).joinpath("assets").joinpath(name)
+    rows = tuple(
+        line.strip()
+        for line in asset_path.read_text(encoding="ascii").splitlines()
+        if line.strip()
+    )
+    if not rows or not rows[0]:
+        raise ValueError(f"ASCII art asset {name!r} is empty")
+    width = len(rows[0])
+    if any(len(row) != width for row in rows):
+        raise ValueError(f"ASCII art asset {name!r} is not rectangular")
+    if set("".join(rows)) - {"#", "."}:
+        raise ValueError(f"ASCII art asset {name!r} contains unsupported pixels")
+    return rows
+
+
+def _draw_ascii_art(
+    draw: ImageDraw.ImageDraw,
+    rows: Sequence[str],
+    *,
+    origin_x: int,
+    origin_y: int,
+    scale: int,
+) -> None:
+    for row_index, row in enumerate(rows):
+        for column_index, pixel in enumerate(row):
+            if pixel != "#":
+                continue
+            left = origin_x + column_index * scale
+            top = origin_y + row_index * scale
+            draw.rectangle(
+                (left, top, left + scale - 1, top + scale - 1),
+                fill=1,
+            )
+
+
 def render_border_loader_frame(step: int) -> bytes:
-    """Render a comet-like dot moving clockwise around the 128x32 outline."""
+    """Render packaged ASCII art, a scan bar, and a clockwise border comet."""
 
     canvas = Image.new("1", (FRAME_WIDTH, FRAME_HEIGHT), 0)
     draw = ImageDraw.Draw(canvas)
     draw.rectangle((0, 0, FRAME_WIDTH - 1, FRAME_HEIGHT - 1), outline=1)
+
+    asset = load_ascii_art_asset()
+    asset_scale = 2
+    asset_width = len(asset[0]) * asset_scale
+    _draw_ascii_art(
+        draw,
+        asset,
+        origin_x=(FRAME_WIDTH - asset_width) // 2,
+        origin_y=6,
+        scale=asset_scale,
+    )
+
+    bar_left = 20
+    bar_right = FRAME_WIDTH - 21
+    bar_top = 24
+    bar_bottom = 29
+    draw.rectangle((bar_left, bar_top, bar_right, bar_bottom), outline=1)
+    inner_left = bar_left + 1
+    inner_width = bar_right - bar_left - 1
+    for offset in range(18):
+        x = inner_left + (step + offset) % inner_width
+        draw.line((x, bar_top + 2, x, bar_bottom - 2), fill=1)
 
     for offset, radius in ((12, 0), (8, 1), (4, 1), (0, 2)):
         x, y = border_loader_position(step - offset)
@@ -484,7 +553,7 @@ def _animate_border_loader(
             elif frame_index:
                 output.write("\n")
             output.write(
-                f"source: border loader | frame {frame_index + 1}/{frames} | "
+                f"source: ASCII-art loader | frame {frame_index + 1}/{frames} | "
                 f"edge pixel ({x}, {y})\n"
             )
             output.write(

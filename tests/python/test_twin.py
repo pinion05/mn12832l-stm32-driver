@@ -11,6 +11,7 @@ from mn12832l.twin import (
     _animate_border_loader,
     border_loader_position,
     decode_pin_trace,
+    load_ascii_art_asset,
     render_border_loader_frame,
     render_tui,
     run_digital_twin,
@@ -71,6 +72,15 @@ class DigitalTwinTests(unittest.TestCase):
             with self.subTest(step=step):
                 self.assertEqual(border_loader_position(step), expected)
 
+    def test_loading_ascii_art_asset_is_packaged_and_rectangular(self) -> None:
+        asset = load_ascii_art_asset()
+
+        self.assertEqual(len(asset), 7)
+        self.assertTrue(all(len(row) == 41 for row in asset))
+        self.assertEqual(asset[0][:5], "#....")
+        self.assertEqual(asset[-1][-5:], ".###.")
+        self.assertLessEqual(set("".join(asset)), {"#", "."})
+
     def test_border_loader_frame_moves_a_visible_head_along_the_outline(self) -> None:
         corner_frame = render_border_loader_frame(0)
         top_frame = render_border_loader_frame(64)
@@ -79,6 +89,12 @@ class DigitalTwinTests(unittest.TestCase):
         self.assertTrue(self._pixel(corner_frame, 1, 1))
         self.assertFalse(self._pixel(top_frame, 1, 1))
         self.assertTrue(self._pixel(top_frame, 64, 1))
+        self.assertTrue(self._pixel(top_frame, 23, 6))
+        self.assertFalse(self._pixel(top_frame, 25, 6))
+        self.assertTrue(self._pixel(top_frame, 37, 6))
+        self.assertTrue(self._pixel(corner_frame, 21, 26))
+        self.assertFalse(self._pixel(top_frame, 21, 26))
+        self.assertTrue(self._pixel(top_frame, 85, 26))
         for x, y in ((0, 0), (127, 0), (127, 31), (0, 31)):
             with self.subTest(corner=(x, y)):
                 self.assertTrue(self._pixel(top_frame, x, y))
@@ -143,7 +159,7 @@ class DigitalTwinTests(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(completed.stdout.count("DIGITAL TWIN: PASS"), 2)
-        self.assertIn("border loader | frame 2/2", completed.stdout)
+        self.assertIn("ASCII-art loader | frame 2/2", completed.stdout)
 
     def test_interactive_loader_clears_before_each_frame_and_restores_cursor(
         self,
