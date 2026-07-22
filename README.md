@@ -40,7 +40,9 @@ Pillow or Adafruit framebuf rendering
         ↓
 VfdDisplay: deduplicate + sequence + CRC + retry
         ↓
-persistent mn12832l-serial-bridge child process
+FrameTransport contract
+  production: SubprocessTransport → persistent serial bridge → UART/USB
+  test/TUI:   DigitalTwinTransport → persistent C system twin
         ↓
 STM32 VfdHostLink: validate + backpressure + back buffer
         ↓  phase 43 → 1
@@ -54,11 +56,13 @@ The byte-level contract is documented in
 
 ## Pin-level digital twin (no display required)
 
-The digital twin does not print the source image directly. It sends the real
-512-byte frame through the production C scan packer/emitter, replaces the six
-STM32 GPIO outputs (`SIN`, `CLK`, `LAT`, `BLANK`, `EF`, and `HV`) with virtual
-pins, and reconstructs the image only from those pin events. A mismatch or an
-unsafe control-pin sequence fails instead of drawing a false success screen.
+The TUI is not a parallel renderer. It drives the same `VfdDisplay` API and
+`FrameTransport` contract as the Raspberry Pi path, sends the same sequenced
+522-byte CRC packet into the production C `VfdHostLink`, swaps the real double
+buffer, and then runs the production scan packer/emitter. Only the physical
+UART/USB bridge and GPIO pins are replaced by `DigitalTwinTransport` and virtual
+pins. A mismatch, NACK, or unsafe pin sequence fails instead of drawing a false
+success screen.
 
 ```sh
 # Full-width 128-column terminal view
@@ -79,7 +83,7 @@ make twin PYTHON=.venv/bin/python \
 
 The loader rasterizes the packaged `assets/loading_wordmark.txt` ASCII art,
 adds a wrapped scan bar and border comet, then verifies every animated frame
-through the C pin twin before drawing it.
+through the complete host-link/buffer/scan system twin before drawing it.
 
 A successful run reports `DIGITAL TWIN: PASS`, 43 phases, 10,320 rising clock
 edges, 43 latches, 43 pixel/grid gaps, and safe final control-pin levels. See

@@ -1,4 +1,4 @@
-"""Pin-level digital twin and terminal renderer for the MN12832L scan core."""
+"""Full-stack digital twin and terminal renderer for the MN12832L driver."""
 
 from __future__ import annotations
 
@@ -15,8 +15,20 @@ from typing import Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .protocol import FRAME_BYTES, FRAME_HEIGHT, FRAME_WIDTH
+from .display import DisplayError, VfdDisplay
+from .protocol import (
+    ACK_PACKET_BYTES,
+    FRAME_BYTES,
+    FRAME_HEADER_BYTES,
+    FRAME_HEIGHT,
+    FRAME_PACKET_BYTES,
+    FRAME_WIDTH,
+    AckStatus,
+    ProtocolError,
+    decode_ack,
+)
 from .renderer import MvlsbRenderer
+from .transport import CommandPart, SubprocessTransport, TransportError
 
 TRACE_HEADER = b"VFDTPIN1"
 SCAN_PHASES = 43
@@ -25,6 +37,10 @@ GRID_BITS_PER_PHASE = 48
 BITS_PER_PHASE = PIXEL_BITS_PER_PHASE + GRID_BITS_PER_PHASE
 BORDER_PERIMETER_PIXELS = 2 * (FRAME_WIDTH + FRAME_HEIGHT) - 4
 DEFAULT_ASCII_ART_ASSET = "loading_wordmark.txt"
+PIN_EVENTS_PER_FRAME = (
+    7 + SCAN_PHASES * (1 + BITS_PER_PHASE * 3 + 1 + 4 + 1) + 4
+)
+PIN_TRACE_BYTES = len(TRACE_HEADER) + PIN_EVENTS_PER_FRAME * 2
 
 EVENT_PHASE = 1
 EVENT_SIN = 2
@@ -39,6 +55,48 @@ EVENT_END = 9
 
 class DigitalTwinError(RuntimeError):
     """Raised when the virtual pin trace violates the hardware protocol."""
+
+
+class DigitalTwinTransport(SubprocessTransport):
+    """FrameTransport adapter backed by the persistent C system twin."""
+
+    def __init__(
+        self, command: Sequence[CommandPart], timeout: float = 2.0
+    ) -> None:
+        super().__init__(command, timeout=timeout)
+        self._last_result: Optional[DigitalTwinResult] = None
+
+    @property
+    def last_result(self) -> Optional[DigitalTwinResult]:
+        """Return the pin reconstruction produced by the latest accepted ACK."""
+
+        return self._last_result
+
+    def open(self) -> None:
+        self._last_result = None
+        super().open()
+
+    def _read_response(
+        self, process: subprocess.Popen[bytes], packet: bytes
+    ) -> bytes:
+        self._last_result = None
+        ack = self._read_exact(process, ACK_PACKET_BYTES)
+        try:
+            decoded = decode_ack(ack)
+        except ProtocolError as error:
+            raise TransportError("system twin returned an invalid ACK") from error
+
+        if decoded.status is not AckStatus.OK:
+            return ack
+        if len(packet) != FRAME_PACKET_BYTES:
+            raise TransportError("system twin accepted a malformed frame packet")
+
+        trace = self._read_exact(process, PIN_TRACE_BYTES)
+        source_frame = packet[
+            FRAME_HEADER_BYTES : FRAME_HEADER_BYTES + FRAME_BYTES
+        ]
+        self._last_result = decode_pin_trace(trace, source_frame=source_frame)
+        return ack
 
 
 @dataclass(frozen=True)
@@ -281,7 +339,7 @@ def decode_pin_trace(
 def run_digital_twin(
     frame: bytes, engine: Union[os.PathLike[str], str]
 ) -> DigitalTwinResult:
-    """Run the production C scan core against virtual pins and verify it."""
+    """Run the raw C scan/pin unit twin without the host transport layers."""
 
     frame = bytes(frame)
     if len(frame) != FRAME_BYTES:
@@ -387,10 +445,10 @@ def render_tui(
 
 
 def _default_engine() -> str:
-    configured = os.environ.get("MN12832L_PIN_TWIN")
+    configured = os.environ.get("MN12832L_SYSTEM_TWIN")
     if configured:
         return configured
-    return str(Path(__file__).resolve().parents[2] / "build" / "vfd_pin_twin")
+    return str(Path(__file__).resolve().parents[2] / "build" / "vfd_system_twin")
 
 
 def _render_demo(text: str) -> bytes:
@@ -539,33 +597,41 @@ def _animate_border_loader(
     next_frame_at = time.monotonic()
     output = stream if stream is not None else sys.stdout
     interactive = output.isatty()
+    transport = DigitalTwinTransport([engine], timeout=5.0)
+    display = VfdDisplay(transport)
 
     if interactive:
         output.write("\033[?25l\033[2J")
     try:
-        for frame_index in range(frames):
-            step = frame_index * step_pixels
-            frame = render_border_loader_frame(step)
-            result = run_digital_twin(frame, engine)
-            x, y = border_loader_position(step)
-            if interactive:
-                output.write("\033[H\033[J")
-            elif frame_index:
-                output.write("\n")
-            output.write(
-                f"source: ASCII-art loader | frame {frame_index + 1}/{frames} | "
-                f"edge pixel ({x}, {y})\n"
-            )
-            output.write(
-                render_tui(result, color=color, compact=compact) + "\n"
-            )
-            output.flush()
+        with display:
+            for frame_index in range(frames):
+                step = frame_index * step_pixels
+                frame = render_border_loader_frame(step)
+                display.present(frame)
+                result = transport.last_result
+                if result is None:
+                    raise DigitalTwinError(
+                        "accepted frame produced no system-twin pin trace"
+                    )
+                x, y = border_loader_position(step)
+                if interactive:
+                    output.write("\033[H\033[J")
+                elif frame_index:
+                    output.write("\n")
+                output.write(
+                    "source: Raspberry Pi stack → C system twin | "
+                    f"frame {frame_index + 1}/{frames} | edge pixel ({x}, {y})\n"
+                )
+                output.write(
+                    render_tui(result, color=color, compact=compact) + "\n"
+                )
+                output.flush()
 
-            next_frame_at += interval
-            if frame_index + 1 < frames:
-                delay = next_frame_at - time.monotonic()
-                if delay > 0:
-                    time.sleep(delay)
+                next_frame_at += interval
+                if frame_index + 1 < frames:
+                    delay = next_frame_at - time.monotonic()
+                    if delay > 0:
+                        time.sleep(delay)
     except KeyboardInterrupt:
         return 130
     finally:
@@ -616,8 +682,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 compact=args.compact,
             )
         frame = _render_image(args.image) if args.image else _render_demo(args.text)
-        result = run_digital_twin(frame, args.engine)
-    except (DigitalTwinError, OSError, ValueError) as error:
+        transport = DigitalTwinTransport([args.engine], timeout=5.0)
+        display = VfdDisplay(transport)
+        with display:
+            display.present(frame)
+            result = transport.last_result
+        if result is None:
+            raise DigitalTwinError(
+                "accepted frame produced no system-twin pin trace"
+            )
+    except (
+        DigitalTwinError,
+        DisplayError,
+        OSError,
+        TransportError,
+        ValueError,
+    ) as error:
         parser.exit(2, f"digital twin failed: {error}\n")
 
     source_label = f'image "{args.image}"' if args.image else f'text "{args.text}"'

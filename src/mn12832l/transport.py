@@ -73,7 +73,7 @@ class SubprocessTransport:
                 self._write_all(process.stdin.fileno(), packet)
             except (BrokenPipeError, OSError) as error:
                 raise TransportError("failed to write to bridge") from error
-            return self._read_exact(process, ACK_PACKET_BYTES)
+            return self._read_response(process, packet)
 
     def close(self) -> None:
         """Close stdin and stop the persistent bridge process."""
@@ -105,6 +105,14 @@ class SubprocessTransport:
         if process is None or process.poll() is not None:
             raise TransportClosedError("transport is not open")
         return process
+
+    def _read_response(
+        self, process: subprocess.Popen[bytes], packet: bytes
+    ) -> bytes:
+        """Read the standard ACK response for one transmitted packet."""
+
+        del packet
+        return self._read_exact(process, ACK_PACKET_BYTES)
 
     def _read_exact(
         self, process: subprocess.Popen[bytes], size: int

@@ -26,8 +26,13 @@ BOARD_SOURCES := \
 	$(FIRMWARE_DIR)/main.c \
 	$(FIRMWARE_DIR)/stm32f0xx_hal_msp.c \
 	$(FIRMWARE_DIR)/stm32f0xx_it.c
+TOOL_SOURCES := \
+	tools/vfd_pin_trace.c \
+	tools/vfd_pin_twin.c \
+	tools/vfd_system_twin.c
 
 .PHONY: all characterize test test-font test-scan test-host-link test-python twin \
+	test-twin-unit test-pin-twin test-system-twin \
 	test-delay test-contracts test-dependencies \
 	warnings warnings-core warnings-board warnings-tools analyze clean
 
@@ -60,10 +65,20 @@ $(BUILD_DIR)/vfd_host_link_peer: $(TEST_DIR)/vfd_host_link_peer.c \
 		$(TEST_DIR)/vfd_host_link_peer.c \
 		$(FIRMWARE_DIR)/vfd_host_link.c -o $@
 
-$(BUILD_DIR)/vfd_pin_twin: tools/vfd_pin_twin.c \
+$(BUILD_DIR)/vfd_pin_twin: tools/vfd_pin_twin.c tools/vfd_pin_trace.c \
+		tools/vfd_pin_trace.h \
 		$(FIRMWARE_DIR)/vfd_scan.c $(FIRMWARE_DIR)/vfd_scan.h | $(BUILD_DIR)
 	$(HOST_CC) $(HOST_CPPFLAGS) $(STRICT_CFLAGS) \
-		tools/vfd_pin_twin.c $(FIRMWARE_DIR)/vfd_scan.c -o $@
+		tools/vfd_pin_twin.c tools/vfd_pin_trace.c \
+		$(FIRMWARE_DIR)/vfd_scan.c -o $@
+
+$(BUILD_DIR)/vfd_system_twin: tools/vfd_system_twin.c \
+		tools/vfd_pin_trace.c tools/vfd_pin_trace.h \
+		$(FIRMWARE_DIR)/vfd_host_link.c $(FIRMWARE_DIR)/vfd_host_link.h \
+		$(FIRMWARE_DIR)/vfd_scan.c $(FIRMWARE_DIR)/vfd_scan.h | $(BUILD_DIR)
+	$(HOST_CC) $(HOST_CPPFLAGS) $(STRICT_CFLAGS) \
+		tools/vfd_system_twin.c tools/vfd_pin_trace.c \
+		$(FIRMWARE_DIR)/vfd_host_link.c $(FIRMWARE_DIR)/vfd_scan.c -o $@
 
 $(BUILD_DIR)/vfd_delay_arm.s: $(FIRMWARE_DIR)/vfd_delay.c \
 		$(FIRMWARE_DIR)/vfd_delay.h | $(BUILD_DIR)
@@ -82,14 +97,31 @@ test-scan: $(BUILD_DIR)/test_vfd_scan
 test-host-link: $(BUILD_DIR)/test_vfd_host_link
 	./$(BUILD_DIR)/test_vfd_host_link
 
-test-python: $(BUILD_DIR)/vfd_host_link_peer $(BUILD_DIR)/vfd_pin_twin
+test-python: $(BUILD_DIR)/vfd_host_link_peer $(BUILD_DIR)/vfd_pin_twin \
+		$(BUILD_DIR)/vfd_system_twin
 	PYTHONPATH=src MN12832L_C_PEER=$(CURDIR)/$(BUILD_DIR)/vfd_host_link_peer \
 		MN12832L_PIN_TWIN=$(CURDIR)/$(BUILD_DIR)/vfd_pin_twin \
+		MN12832L_SYSTEM_TWIN=$(CURDIR)/$(BUILD_DIR)/vfd_system_twin \
 		$(PYTHON) -m unittest discover -s $(TEST_DIR)/python \
 		-p 'test_*.py' -v
 
-twin: $(BUILD_DIR)/vfd_pin_twin
+test-twin-unit:
+	PYTHONPATH=src $(PYTHON) -m unittest \
+		tests.python.test_twin.DigitalTwinUnitTests -v
+
+test-pin-twin: $(BUILD_DIR)/vfd_pin_twin
 	PYTHONPATH=src MN12832L_PIN_TWIN=$(CURDIR)/$(BUILD_DIR)/vfd_pin_twin \
+		$(PYTHON) -m unittest \
+		tests.python.test_twin.PinTwinIntegrationTests -v
+
+test-system-twin: $(BUILD_DIR)/vfd_system_twin
+	PYTHONPATH=src \
+		MN12832L_SYSTEM_TWIN=$(CURDIR)/$(BUILD_DIR)/vfd_system_twin \
+		$(PYTHON) -m unittest \
+		tests.python.test_twin.SystemTwinEndToEndTests -v
+
+twin: $(BUILD_DIR)/vfd_system_twin
+	PYTHONPATH=src MN12832L_SYSTEM_TWIN=$(CURDIR)/$(BUILD_DIR)/vfd_system_twin \
 		$(PYTHON) -m mn12832l.twin $(TWIN_ARGS)
 
 test-delay: $(BUILD_DIR)/vfd_delay_arm.s $(TEST_DIR)/check_delay_codegen.py
@@ -99,7 +131,8 @@ test-contracts: $(TEST_DIR)/test_firmware_contracts.py $(BOARD_SOURCES)
 	$(PYTHON) $(TEST_DIR)/test_firmware_contracts.py
 
 test-dependencies: $(BUILD_DIR)/test_vfd_font $(BUILD_DIR)/test_vfd_scan \
-		$(BUILD_DIR)/test_vfd_host_link
+		$(BUILD_DIR)/test_vfd_host_link $(BUILD_DIR)/vfd_pin_twin \
+		$(BUILD_DIR)/vfd_system_twin
 	@status=0; $(MAKE) -q -W $(FIRMWARE_DIR)/GT20L_Font.h \
 		$(BUILD_DIR)/test_vfd_font || status=$$?; \
 		test $$status -eq 1 || { echo "font header dependency check failed"; exit 1; }
@@ -109,6 +142,12 @@ test-dependencies: $(BUILD_DIR)/test_vfd_font $(BUILD_DIR)/test_vfd_scan \
 	@status=0; $(MAKE) -q -W $(FIRMWARE_DIR)/vfd_host_link.h \
 		$(BUILD_DIR)/test_vfd_host_link || status=$$?; \
 		test $$status -eq 1 || { echo "host-link header dependency check failed"; exit 1; }
+	@status=0; $(MAKE) -q -W tools/vfd_pin_trace.h \
+		$(BUILD_DIR)/vfd_pin_twin || status=$$?; \
+		test $$status -eq 1 || { echo "pin-twin dependency check failed"; exit 1; }
+	@status=0; $(MAKE) -q -W $(FIRMWARE_DIR)/vfd_host_link.h \
+		$(BUILD_DIR)/vfd_system_twin || status=$$?; \
+		test $$status -eq 1 || { echo "system-twin dependency check failed"; exit 1; }
 	@echo "make dependency checks passed"
 
 test: test-font test-scan test-host-link test-python test-delay test-contracts \
@@ -127,8 +166,10 @@ warnings-board:
 	done
 
 warnings-tools:
-	$(HOST_CC) $(HOST_CPPFLAGS) $(STRICT_CFLAGS) -fsyntax-only \
-		tools/vfd_pin_twin.c
+	@for source in $(TOOL_SOURCES); do \
+		echo "[warnings-tools] $$source"; \
+		$(HOST_CC) $(HOST_CPPFLAGS) $(STRICT_CFLAGS) -fsyntax-only "$$source" || exit; \
+	done
 
 warnings: warnings-core warnings-board warnings-tools
 
@@ -142,9 +183,11 @@ analyze: | $(BUILD_DIR)
 		$(HOST_CC) $$includes $(COMMON_CFLAGS) --analyze \
 			-Xanalyzer -analyzer-output=text "$$source" || exit; \
 	done
-	@echo "[analyze] tools/vfd_pin_twin.c"
-	@$(HOST_CC) $(HOST_CPPFLAGS) $(COMMON_CFLAGS) --analyze \
-		-Xanalyzer -analyzer-output=text tools/vfd_pin_twin.c
+	@for source in $(TOOL_SOURCES); do \
+		echo "[analyze] $$source"; \
+		$(HOST_CC) $(HOST_CPPFLAGS) $(COMMON_CFLAGS) --analyze \
+			-Xanalyzer -analyzer-output=text "$$source" || exit; \
+	done
 
 clean:
 	rm -rf $(BUILD_DIR) *.plist
