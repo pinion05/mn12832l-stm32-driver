@@ -6,9 +6,10 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -20,6 +21,7 @@ SCAN_PHASES = 43
 PIXEL_BITS_PER_PHASE = 192
 GRID_BITS_PER_PHASE = 48
 BITS_PER_PHASE = PIXEL_BITS_PER_PHASE + GRID_BITS_PER_PHASE
+BORDER_PERIMETER_PIXELS = 2 * (FRAME_WIDTH + FRAME_HEIGHT) - 4
 
 EVENT_PHASE = 1
 EVENT_SIN = 2
@@ -401,6 +403,44 @@ def _render_demo(text: str) -> bytes:
     return renderer.snapshot()
 
 
+def border_loader_position(step: int) -> Tuple[int, int]:
+    """Return the wrapped outer-edge pixel for one animation step."""
+
+    position = step % BORDER_PERIMETER_PIXELS
+    if position < FRAME_WIDTH:
+        return position, 0
+
+    position -= FRAME_WIDTH
+    if position < FRAME_HEIGHT - 1:
+        return FRAME_WIDTH - 1, position + 1
+
+    position -= FRAME_HEIGHT - 1
+    if position < FRAME_WIDTH - 1:
+        return FRAME_WIDTH - 2 - position, FRAME_HEIGHT - 1
+
+    position -= FRAME_WIDTH - 1
+    return 0, FRAME_HEIGHT - 2 - position
+
+
+def render_border_loader_frame(step: int) -> bytes:
+    """Render a comet-like dot moving clockwise around the 128x32 outline."""
+
+    canvas = Image.new("1", (FRAME_WIDTH, FRAME_HEIGHT), 0)
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle((0, 0, FRAME_WIDTH - 1, FRAME_HEIGHT - 1), outline=1)
+
+    for offset, radius in ((12, 0), (8, 1), (4, 1), (0, 2)):
+        x, y = border_loader_position(step - offset)
+        draw.ellipse(
+            (x - radius, y - radius, x + radius, y + radius),
+            fill=1,
+        )
+
+    renderer = MvlsbRenderer()
+    renderer.load_image(canvas)
+    return renderer.snapshot()
+
+
 def _render_image(path: str) -> bytes:
     with Image.open(path) as source:
         image = source.convert("1")
@@ -416,20 +456,96 @@ def _render_image(path: str) -> bytes:
     return renderer.snapshot()
 
 
+def _animate_border_loader(
+    engine: str,
+    *,
+    frames: int,
+    fps: float,
+    step_pixels: int,
+    color: bool,
+    compact: bool,
+    stream: Optional[TextIO] = None,
+) -> int:
+    interval = 1.0 / fps
+    next_frame_at = time.monotonic()
+    output = stream if stream is not None else sys.stdout
+    interactive = output.isatty()
+
+    if interactive:
+        output.write("\033[?25l\033[2J")
+    try:
+        for frame_index in range(frames):
+            step = frame_index * step_pixels
+            frame = render_border_loader_frame(step)
+            result = run_digital_twin(frame, engine)
+            x, y = border_loader_position(step)
+            if interactive:
+                output.write("\033[H\033[J")
+            elif frame_index:
+                output.write("\n")
+            output.write(
+                f"source: border loader | frame {frame_index + 1}/{frames} | "
+                f"edge pixel ({x}, {y})\n"
+            )
+            output.write(
+                render_tui(result, color=color, compact=compact) + "\n"
+            )
+            output.flush()
+
+            next_frame_at += interval
+            if frame_index + 1 < frames:
+                delay = next_frame_at - time.monotonic()
+                if delay > 0:
+                    time.sleep(delay)
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        if interactive:
+            output.write("\033[?25h")
+            output.flush()
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """CLI entry point for an inspectable terminal digital twin."""
 
     parser = argparse.ArgumentParser(
-        description="Render one MN12832L frame through virtual STM32 pins"
+        description="Render MN12832L frames through virtual STM32 pins"
     )
     parser.add_argument("--engine", default=_default_engine())
     parser.add_argument("--text", default="MN12832L")
-    parser.add_argument("--image", help="center an image inside the 128x32 frame")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--image", help="center an image inside the 128x32 frame")
+    source.add_argument(
+        "--border-loader",
+        action="store_true",
+        help="animate a dot clockwise around the display outline",
+    )
+    parser.add_argument("--frames", type=int, default=80)
+    parser.add_argument("--fps", type=float, default=20.0)
+    parser.add_argument("--step-pixels", type=int, default=4)
     parser.add_argument("--compact", action="store_true", help="use 64x8 Braille output")
     parser.add_argument("--no-color", action="store_true")
     args = parser.parse_args(argv)
 
+    if args.border_loader:
+        if args.frames <= 0:
+            parser.error("--frames must be greater than zero")
+        if args.fps <= 0:
+            parser.error("--fps must be greater than zero")
+        if args.step_pixels <= 0:
+            parser.error("--step-pixels must be greater than zero")
+
     try:
+        if args.border_loader:
+            return _animate_border_loader(
+                args.engine,
+                frames=args.frames,
+                fps=args.fps,
+                step_pixels=args.step_pixels,
+                color=not args.no_color,
+                compact=args.compact,
+            )
         frame = _render_image(args.image) if args.image else _render_demo(args.text)
         result = run_digital_twin(frame, args.engine)
     except (DigitalTwinError, OSError, ValueError) as error:

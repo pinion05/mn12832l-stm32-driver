@@ -71,6 +71,10 @@ make twin PYTHON=.venv/bin/python \
 # Test a real image (scaled to fit 128x32)
 make twin PYTHON=.venv/bin/python \
   TWIN_ARGS='--image ./logo.png --compact'
+
+# Animate a verified dot around the 128x32 outer edge
+make twin PYTHON=.venv/bin/python \
+  TWIN_ARGS='--border-loader --compact --frames 160 --fps 20'
 ```
 
 A successful run reports `DIGITAL TWIN: PASS`, 43 phases, 10,320 rising clock

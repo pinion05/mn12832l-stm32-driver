@@ -55,6 +55,18 @@ make twin PYTHON=.venv/bin/python \
   TWIN_ARGS='--image ./logo.png --compact'
 ```
 
+외곽선을 따라 점이 도는 로딩 모션도 볼 수 있습니다.
+
+```sh
+make twin PYTHON=.venv/bin/python \
+  TWIN_ARGS='--border-loader --compact --frames 160 --fps 20'
+```
+
+기본 이동량은 프레임마다 4픽셀이며 `--step-pixels`로 바꿀 수 있습니다.
+애니메이션도 원본 그림만 터미널에 반복 출력하는 방식이 아닙니다. **매 프레임마다**
+새 512바이트 버퍼를 만들고, C 스캔 엔진을 초기화해 가상 핀 31,272개 이벤트를
+생성한 뒤, 그 이벤트를 다시 복원·검증하고 터미널을 지워 다시 그립니다.
+
 ## 가상 핀 인터페이스
 
 `tools/vfd_pin_twin.c`가 물리 GPIO 대신 다음 이벤트를 2바이트씩 기록합니다.

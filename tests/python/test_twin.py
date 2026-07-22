@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import subprocess
 import sys
@@ -7,7 +8,10 @@ import unittest
 
 from mn12832l.twin import (
     DigitalTwinError,
+    _animate_border_loader,
+    border_loader_position,
     decode_pin_trace,
+    render_border_loader_frame,
     render_tui,
     run_digital_twin,
 )
@@ -49,6 +53,39 @@ class DigitalTwinTests(unittest.TestCase):
         self.assertIn("▀", output)
         self.assertIn("▄", output)
 
+    def test_border_loader_position_follows_every_outer_edge_and_wraps(self) -> None:
+        checks = (
+            (0, (0, 0)),
+            (127, (127, 0)),
+            (128, (127, 1)),
+            (158, (127, 31)),
+            (159, (126, 31)),
+            (285, (0, 31)),
+            (286, (0, 30)),
+            (315, (0, 1)),
+            (316, (0, 0)),
+            (-1, (0, 1)),
+        )
+
+        for step, expected in checks:
+            with self.subTest(step=step):
+                self.assertEqual(border_loader_position(step), expected)
+
+    def test_border_loader_frame_moves_a_visible_head_along_the_outline(self) -> None:
+        corner_frame = render_border_loader_frame(0)
+        top_frame = render_border_loader_frame(64)
+
+        self.assertEqual(len(corner_frame), 512)
+        self.assertTrue(self._pixel(corner_frame, 1, 1))
+        self.assertFalse(self._pixel(top_frame, 1, 1))
+        self.assertTrue(self._pixel(top_frame, 64, 1))
+        for x, y in ((0, 0), (127, 0), (127, 31), (0, 31)):
+            with self.subTest(corner=(x, y)):
+                self.assertTrue(self._pixel(top_frame, x, y))
+
+        result = run_digital_twin(top_frame, self.engine)
+        self.assertTrue(result.matches_source)
+
     def test_invalid_trace_and_frame_size_are_rejected(self) -> None:
         with self.assertRaises(DigitalTwinError):
             decode_pin_trace(b"not-a-pin-trace")
@@ -78,6 +115,56 @@ class DigitalTwinTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("DIGITAL TWIN: PASS", completed.stdout)
         self.assertIn("HELLO", completed.stdout)
+
+    def test_cli_animates_border_loader_through_verified_pin_frames(self) -> None:
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "mn12832l.twin",
+                "--engine",
+                self.engine,
+                "--border-loader",
+                "--frames",
+                "2",
+                "--fps",
+                "1000",
+                "--step-pixels",
+                "7",
+                "--compact",
+                "--no-color",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=5.0,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.count("DIGITAL TWIN: PASS"), 2)
+        self.assertIn("border loader | frame 2/2", completed.stdout)
+
+    def test_interactive_loader_clears_before_each_frame_and_restores_cursor(
+        self,
+    ) -> None:
+        stream = self._InteractiveBuffer()
+
+        return_code = _animate_border_loader(
+            self.engine,
+            frames=2,
+            fps=1000,
+            step_pixels=7,
+            color=False,
+            compact=True,
+            stream=stream,
+        )
+
+        output = stream.getvalue()
+        self.assertEqual(return_code, 0)
+        self.assertTrue(output.startswith("\033[?25l\033[2J"))
+        self.assertEqual(output.count("\033[H\033[J"), 2)
+        self.assertTrue(output.endswith("\033[?25h"))
 
     def test_decoder_rejects_an_unsafe_virtual_pin_shutdown(self) -> None:
         completed = subprocess.run(
@@ -113,6 +200,14 @@ class DigitalTwinTests(unittest.TestCase):
 
         with self.assertRaisesRegex(DigitalTwinError, "does not match"):
             decode_pin_trace(bytes(trace), source_frame=bytes(512))
+
+    @staticmethod
+    def _pixel(frame: bytes, x: int, y: int) -> bool:
+        return bool(frame[(y // 8) * 128 + x] & (1 << (y % 8)))
+
+    class _InteractiveBuffer(io.StringIO):
+        def isatty(self) -> bool:
+            return True
 
 
 if __name__ == "__main__":
