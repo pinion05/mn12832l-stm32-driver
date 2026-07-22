@@ -1,4 +1,4 @@
-"""Pin-level digital twin and terminal renderer for the MN12832L scan core."""
+"""Full-stack digital twin and terminal renderer for the MN12832L driver."""
 
 from __future__ import annotations
 
@@ -6,20 +6,41 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
+from functools import lru_cache
+from importlib import resources
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Mapping, Optional, Sequence, TextIO, Tuple, Union
 
 from PIL import Image, ImageDraw, ImageFont
 
-from .protocol import FRAME_BYTES, FRAME_HEIGHT, FRAME_WIDTH
+from .display import DisplayError, VfdDisplay
+from .protocol import (
+    ACK_PACKET_BYTES,
+    FRAME_BYTES,
+    FRAME_HEADER_BYTES,
+    FRAME_HEIGHT,
+    FRAME_PACKET_BYTES,
+    FRAME_WIDTH,
+    AckStatus,
+    ProtocolError,
+    decode_ack,
+)
 from .renderer import MvlsbRenderer
+from .transport import CommandPart, SubprocessTransport, TransportError
 
 TRACE_HEADER = b"VFDTPIN1"
 SCAN_PHASES = 43
 PIXEL_BITS_PER_PHASE = 192
 GRID_BITS_PER_PHASE = 48
 BITS_PER_PHASE = PIXEL_BITS_PER_PHASE + GRID_BITS_PER_PHASE
+BORDER_PERIMETER_PIXELS = 2 * (FRAME_WIDTH + FRAME_HEIGHT) - 4
+DEFAULT_ASCII_ART_ASSET = "loading_wordmark.txt"
+PIN_EVENTS_PER_FRAME = (
+    7 + SCAN_PHASES * (1 + BITS_PER_PHASE * 3 + 1 + 4 + 1) + 4
+)
+PIN_TRACE_BYTES = len(TRACE_HEADER) + PIN_EVENTS_PER_FRAME * 2
 
 EVENT_PHASE = 1
 EVENT_SIN = 2
@@ -34,6 +55,48 @@ EVENT_END = 9
 
 class DigitalTwinError(RuntimeError):
     """Raised when the virtual pin trace violates the hardware protocol."""
+
+
+class DigitalTwinTransport(SubprocessTransport):
+    """FrameTransport adapter backed by the persistent C system twin."""
+
+    def __init__(
+        self, command: Sequence[CommandPart], timeout: float = 2.0
+    ) -> None:
+        super().__init__(command, timeout=timeout)
+        self._last_result: Optional[DigitalTwinResult] = None
+
+    @property
+    def last_result(self) -> Optional[DigitalTwinResult]:
+        """Return the pin reconstruction produced by the latest accepted ACK."""
+
+        return self._last_result
+
+    def open(self) -> None:
+        self._last_result = None
+        super().open()
+
+    def _read_response(
+        self, process: subprocess.Popen[bytes], packet: bytes
+    ) -> bytes:
+        self._last_result = None
+        ack = self._read_exact(process, ACK_PACKET_BYTES)
+        try:
+            decoded = decode_ack(ack)
+        except ProtocolError as error:
+            raise TransportError("system twin returned an invalid ACK") from error
+
+        if decoded.status is not AckStatus.OK:
+            return ack
+        if len(packet) != FRAME_PACKET_BYTES:
+            raise TransportError("system twin accepted a malformed frame packet")
+
+        trace = self._read_exact(process, PIN_TRACE_BYTES)
+        source_frame = packet[
+            FRAME_HEADER_BYTES : FRAME_HEADER_BYTES + FRAME_BYTES
+        ]
+        self._last_result = decode_pin_trace(trace, source_frame=source_frame)
+        return ack
 
 
 @dataclass(frozen=True)
@@ -276,7 +339,7 @@ def decode_pin_trace(
 def run_digital_twin(
     frame: bytes, engine: Union[os.PathLike[str], str]
 ) -> DigitalTwinResult:
-    """Run the production C scan core against virtual pins and verify it."""
+    """Run the raw C scan/pin unit twin without the host transport layers."""
 
     frame = bytes(frame)
     if len(frame) != FRAME_BYTES:
@@ -382,10 +445,10 @@ def render_tui(
 
 
 def _default_engine() -> str:
-    configured = os.environ.get("MN12832L_PIN_TWIN")
+    configured = os.environ.get("MN12832L_SYSTEM_TWIN")
     if configured:
         return configured
-    return str(Path(__file__).resolve().parents[2] / "build" / "vfd_pin_twin")
+    return str(Path(__file__).resolve().parents[2] / "build" / "vfd_system_twin")
 
 
 def _render_demo(text: str) -> bytes:
@@ -396,6 +459,110 @@ def _render_demo(text: str) -> bytes:
     draw.text((3, 3), text[:20], font=font, fill=1)
     draw.line((3, 16, FRAME_WIDTH - 4, 16), fill=1)
     draw.text((3, 19), "PIN TWIN", font=font, fill=1)
+    renderer = MvlsbRenderer()
+    renderer.load_image(canvas)
+    return renderer.snapshot()
+
+
+def border_loader_position(step: int) -> Tuple[int, int]:
+    """Return the wrapped outer-edge pixel for one animation step."""
+
+    position = step % BORDER_PERIMETER_PIXELS
+    if position < FRAME_WIDTH:
+        return position, 0
+
+    position -= FRAME_WIDTH
+    if position < FRAME_HEIGHT - 1:
+        return FRAME_WIDTH - 1, position + 1
+
+    position -= FRAME_HEIGHT - 1
+    if position < FRAME_WIDTH - 1:
+        return FRAME_WIDTH - 2 - position, FRAME_HEIGHT - 1
+
+    position -= FRAME_WIDTH - 1
+    return 0, FRAME_HEIGHT - 2 - position
+
+
+@lru_cache(maxsize=8)
+def load_ascii_art_asset(
+    name: str = DEFAULT_ASCII_ART_ASSET,
+) -> Tuple[str, ...]:
+    """Load and validate a packaged ``#``/``.`` monochrome art asset."""
+
+    if not name or Path(name).name != name:
+        raise ValueError("ASCII art asset name must be a plain file name")
+    asset_path = resources.files(__package__).joinpath("assets").joinpath(name)
+    rows = tuple(
+        line.strip()
+        for line in asset_path.read_text(encoding="ascii").splitlines()
+        if line.strip()
+    )
+    if not rows or not rows[0]:
+        raise ValueError(f"ASCII art asset {name!r} is empty")
+    width = len(rows[0])
+    if any(len(row) != width for row in rows):
+        raise ValueError(f"ASCII art asset {name!r} is not rectangular")
+    if set("".join(rows)) - {"#", "."}:
+        raise ValueError(f"ASCII art asset {name!r} contains unsupported pixels")
+    return rows
+
+
+def _draw_ascii_art(
+    draw: ImageDraw.ImageDraw,
+    rows: Sequence[str],
+    *,
+    origin_x: int,
+    origin_y: int,
+    scale: int,
+) -> None:
+    for row_index, row in enumerate(rows):
+        for column_index, pixel in enumerate(row):
+            if pixel != "#":
+                continue
+            left = origin_x + column_index * scale
+            top = origin_y + row_index * scale
+            draw.rectangle(
+                (left, top, left + scale - 1, top + scale - 1),
+                fill=1,
+            )
+
+
+def render_border_loader_frame(step: int) -> bytes:
+    """Render packaged ASCII art, a scan bar, and a clockwise border comet."""
+
+    canvas = Image.new("1", (FRAME_WIDTH, FRAME_HEIGHT), 0)
+    draw = ImageDraw.Draw(canvas)
+    draw.rectangle((0, 0, FRAME_WIDTH - 1, FRAME_HEIGHT - 1), outline=1)
+
+    asset = load_ascii_art_asset()
+    asset_scale = 2
+    asset_width = len(asset[0]) * asset_scale
+    _draw_ascii_art(
+        draw,
+        asset,
+        origin_x=(FRAME_WIDTH - asset_width) // 2,
+        origin_y=6,
+        scale=asset_scale,
+    )
+
+    bar_left = 20
+    bar_right = FRAME_WIDTH - 21
+    bar_top = 24
+    bar_bottom = 29
+    draw.rectangle((bar_left, bar_top, bar_right, bar_bottom), outline=1)
+    inner_left = bar_left + 1
+    inner_width = bar_right - bar_left - 1
+    for offset in range(18):
+        x = inner_left + (step + offset) % inner_width
+        draw.line((x, bar_top + 2, x, bar_bottom - 2), fill=1)
+
+    for offset, radius in ((12, 0), (8, 1), (4, 1), (0, 2)):
+        x, y = border_loader_position(step - offset)
+        draw.ellipse(
+            (x - radius, y - radius, x + radius, y + radius),
+            fill=1,
+        )
+
     renderer = MvlsbRenderer()
     renderer.load_image(canvas)
     return renderer.snapshot()
@@ -416,23 +583,121 @@ def _render_image(path: str) -> bytes:
     return renderer.snapshot()
 
 
+def _animate_border_loader(
+    engine: str,
+    *,
+    frames: int,
+    fps: float,
+    step_pixels: int,
+    color: bool,
+    compact: bool,
+    stream: Optional[TextIO] = None,
+) -> int:
+    interval = 1.0 / fps
+    next_frame_at = time.monotonic()
+    output = stream if stream is not None else sys.stdout
+    interactive = output.isatty()
+    transport = DigitalTwinTransport([engine], timeout=5.0)
+    display = VfdDisplay(transport)
+
+    if interactive:
+        output.write("\033[?25l\033[2J")
+    try:
+        with display:
+            for frame_index in range(frames):
+                step = frame_index * step_pixels
+                frame = render_border_loader_frame(step)
+                display.present(frame)
+                result = transport.last_result
+                if result is None:
+                    raise DigitalTwinError(
+                        "accepted frame produced no system-twin pin trace"
+                    )
+                x, y = border_loader_position(step)
+                if interactive:
+                    output.write("\033[H\033[J")
+                elif frame_index:
+                    output.write("\n")
+                output.write(
+                    "source: Raspberry Pi stack → C system twin | "
+                    f"frame {frame_index + 1}/{frames} | edge pixel ({x}, {y})\n"
+                )
+                output.write(
+                    render_tui(result, color=color, compact=compact) + "\n"
+                )
+                output.flush()
+
+                next_frame_at += interval
+                if frame_index + 1 < frames:
+                    delay = next_frame_at - time.monotonic()
+                    if delay > 0:
+                        time.sleep(delay)
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        if interactive:
+            output.write("\033[?25h")
+            output.flush()
+    return 0
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """CLI entry point for an inspectable terminal digital twin."""
 
     parser = argparse.ArgumentParser(
-        description="Render one MN12832L frame through virtual STM32 pins"
+        description="Render MN12832L frames through virtual STM32 pins"
     )
     parser.add_argument("--engine", default=_default_engine())
     parser.add_argument("--text", default="MN12832L")
-    parser.add_argument("--image", help="center an image inside the 128x32 frame")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--image", help="center an image inside the 128x32 frame")
+    source.add_argument(
+        "--border-loader",
+        action="store_true",
+        help="animate a dot clockwise around the display outline",
+    )
+    parser.add_argument("--frames", type=int, default=80)
+    parser.add_argument("--fps", type=float, default=20.0)
+    parser.add_argument("--step-pixels", type=int, default=4)
     parser.add_argument("--compact", action="store_true", help="use 64x8 Braille output")
     parser.add_argument("--no-color", action="store_true")
     args = parser.parse_args(argv)
 
+    if args.border_loader:
+        if args.frames <= 0:
+            parser.error("--frames must be greater than zero")
+        if args.fps <= 0:
+            parser.error("--fps must be greater than zero")
+        if args.step_pixels <= 0:
+            parser.error("--step-pixels must be greater than zero")
+
     try:
+        if args.border_loader:
+            return _animate_border_loader(
+                args.engine,
+                frames=args.frames,
+                fps=args.fps,
+                step_pixels=args.step_pixels,
+                color=not args.no_color,
+                compact=args.compact,
+            )
         frame = _render_image(args.image) if args.image else _render_demo(args.text)
-        result = run_digital_twin(frame, args.engine)
-    except (DigitalTwinError, OSError, ValueError) as error:
+        transport = DigitalTwinTransport([args.engine], timeout=5.0)
+        display = VfdDisplay(transport)
+        with display:
+            display.present(frame)
+            result = transport.last_result
+        if result is None:
+            raise DigitalTwinError(
+                "accepted frame produced no system-twin pin trace"
+            )
+    except (
+        DigitalTwinError,
+        DisplayError,
+        OSError,
+        TransportError,
+        ValueError,
+    ) as error:
         parser.exit(2, f"digital twin failed: {error}\n")
 
     source_label = f'image "{args.image}"' if args.image else f'text "{args.text}"'
