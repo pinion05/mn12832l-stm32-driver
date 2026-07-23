@@ -7,7 +7,7 @@ import tkinter as tk
 from typing import Optional
 
 from .input import BTN1, BTN2, BTN3, BTN4, ENCODER_ROTATE_CCW, ENCODER_ROTATE_CW
-from .model import MenuModel, ScreenKind
+from .model import MenuModel
 from .presenter import MenuPresenter
 from .tk_source import TkinterSource
 
