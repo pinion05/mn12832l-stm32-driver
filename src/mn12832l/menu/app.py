@@ -41,7 +41,7 @@ class MenuApp:
         self._canvas.pack(padx=12, pady=12)
 
         self._status = tk.Label(self._root, text="...", fg=_VFD_ON, bg="#04080a",
-                                font=("Menlo", 11), anchor="w", justify="left")
+                                font=("Galmuri7", 11), anchor="w", justify="left")
         self._status.pack(fill="x", padx=12)
 
         # 버튼 행
@@ -59,7 +59,7 @@ class MenuApp:
         self._source.make_encoder_rotate(enc_frame, ENCODER_ROTATE_CW, "다이얼 ▶").pack(side="left", padx=4)
 
         self._screen_label = tk.Label(self._root, text="Screen: BOOT", fg="#7aa399",
-                                      bg="#04080a", font=("Menlo", 10))
+                                      bg="#04080a", font=("Galmuri7", 10))
         self._screen_label.pack(pady=4)
 
         self._root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -111,7 +111,7 @@ class MenuApp:
         if not passed and error:
             self._canvas.create_text(
                 _WIDTH * _SCALE // 2, _HEIGHT * _SCALE // 2,
-                text=f"FAIL: {error[:40]}", fill="#ff5c6c", font=("Menlo", 10),
+                text=f"FAIL: {error[:40]}", fill="#ff5c6c", font=("Galmuri7", 10),
             )
 
         status_lines = []
