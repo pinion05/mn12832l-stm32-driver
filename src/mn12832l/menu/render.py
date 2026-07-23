@@ -31,10 +31,9 @@ def draw_screen(screen: Screen, renderer: MvlsbRenderer) -> bytes:
     elif screen.kind is ScreenKind.MUSIC:
         draw.text((0, 0), "NOW PLAYING", font=font, fill=1)
         draw.text((0, 12), "TRACK 01", font=font, fill=1)
-        # 재생바 50% (스펙 4.3)
-        draw.rectangle([0, 26, 63, 30], outline=1, fill=1)  # 채워진 절반
-        draw.rectangle([0, 26, 127, 30], outline=1, fill=0)  # 빈 전체 테두리
-        draw.rectangle([0, 26, 63, 30], outline=1, fill=1)  # 다시 채움
+        # 재생바 50% (스펙 4.3 — y=24)
+        draw.rectangle([0, 24, 127, 28], outline=1, fill=0)  # 전체 테두리
+        draw.rectangle([0, 24, 63, 28], outline=1, fill=1)   # 왼쪽 절반 채움
     elif screen.kind is ScreenKind.GAME:
         draw.text((0, 12), "COMING SOON", font=font, fill=1)
     elif screen.kind is ScreenKind.SETTINGS:
