@@ -37,12 +37,15 @@ GUI 창 자체는 테마 꾸미기를 하지 않고 깔끔한 미리보기 도�
 ## 3. 아키텍처
 
 ```
-┌─ 입력 계층 (하드웨어 시뮬레이션) ────────────┐
-│  Tkinter 버튼 4개 + 엔코더 위젯              │
+┌─ 입력 부품 (교체 가능) ──────────────────────┐
+│  InputSource 약속                            │
+│  • 지금: TkinterSource (마우스 버튼/다이얼)   │
+│  • 나중: GpioSource (진짜 물리 버튼)          │
+│        ↓ 메뉴는 어느 쪽인지 모름              │
 │  → InputEvent(BTN1..4, ENCODER_ROTATE±,      │
 │               ENCODER_CLICK)                 │
 └──────────────────┬───────────────────────────┘
-                   │ InputEvent
+                   │ InputEvent (공통 약속)
                    ▼
 ┌─ 메뉴 모델 (순수 Python) ─────────────────────┐
 │  MenuModel                                   │
@@ -75,24 +78,53 @@ GUI 창 자체는 테마 꾸미기를 하지 않고 깔끔한 미리보기 도�
 
 ## 4. 컴포넌트 상세
 
-### 4.1 입력 모델 (`mn12832l.menu.input`)
+### 4.1 입력 레이어 (`mn12832l.menu.input`)
 
-하드웨어 입력을 추상 InputEvent로 정규화한다. 나중에 물리 GPIO/버튼을 같은
-인터페이스로 교체할 수 있도록, Tkinter에 종속되지 않는 순수 데이터 타입을 쓴다.
+**설계 원칙: 모듈 교체 가능.** 메뉴는 "누가 입력을 보냈는지" 모른다. Tkinter
+마우스 버튼이든, 나중의 라즈베리파이 GPIO 물리 버튼이든, 똑같이 작동해야 한다.
+이를 위해 둘 사이의 약속(인터페이스)을 하나만 정해두고, 그 약속을 지키는
+"입력 부품(Source)"은 자유롭게 교체한다.
 
-```python
-class InputEvent(Enum):
-    BTN1 = auto()
-    BTN2 = auto()
-    BTN3 = auto()
-    BTN4 = auto()
-    ENCODER_ROTATE_CW = auto()   # 시계 방향 한 단계
-    ENCODER_ROTATE_CCW = auto()  # 반시계 방향 한 단계
-    ENCODER_CLICK = auto()       # 엔코더 누름 = 보통 SELECT
+```
+┌─ 메뉴 ──────────┐
+│  InputEvent 받음│  ← "누가 보냈는지" 관심 없음
+└────────┬────────┘
+         │ InputEvent (공통 약속)
+         ▲
+         │ 교체 가능 — 메뉴 수정 없이 갈아끼움
+         │
+  ┌──────┴──────────────┐
+  │  InputSource        │  ← 이것만 바꾸면 됨
+  │                     │
+  │  • TkinterSource    │  지금: 컴퓨터 마우스 버튼
+  │  • GpioSource(나중) │  나중: 진짜 물리 버튼
+  └─────────────────────┘
 ```
 
-Tkinter 버튼은 각각 `BTN1`~`BTN4`를 발생시킨다. 엔코더 위젯(마우스 드래그 또는
-+/- 버튼)은 `ENCODER_ROTATE_*`와 `ENCODER_CLICK`을 발생시킨다.
+#### 4.1.1 공통 약속: InputEvent
+
+입력 부품이 메뉴에 보내는 신호의 형태. 기술(Tkinter? GPIO?)에 종속되지 않는
+순수 데이터. 누가 어떻게 만들었든 이 형태만 맞으면 된다.
+
+- `BTN1`, `BTN2`, `BTN3`, `BTN4` — 버튼 4개 각각의 "눌림"
+- `ENCODER_ROTATE_CW` — 다이얼을 시계 방향으로 한 단계 돌림
+- `ENCODER_ROTATE_CCW` — 다이얼을 반시계 방향으로 한 단계 돌림
+- `ENCODER_CLICK` — 다이얼 누름 (대부분의 화면에서 SELECT 역할)
+
+#### 4.1.2 교체 가능한 부품: InputSource
+
+모든 입력 부품이 지켜야 할 약속. 메뉴는 이것만 보고 입력을 받는다.
+
+> **약속:** 메뉴가 "입력 생겼는지 물어볼 때마다" 입력 부품은 쌓아둔 InputEvent
+> 들을 하나씩(또는 한 번에) 돌려준다. 없으면 비워둔다.
+
+지금 구현할 부품:
+- **TkinterSource** — 창의 마우스 버튼/다이얼 위젯을 InputEvent로 바꿔 줌.
+
+나중에 추가할 부품 (이 스펙 범위 아님):
+- **GpioSource** — 라즈베리파이 GPIO 핀을 읽어 같은 InputEvent로 바꿈.
+
+메뉴 코드를 한 줄도 고치지 않고, TkinterSource 대신 GpioSource를 끼우면 끝이다.
 
 ### 4.2 메뉴 모델 (`mn12832l.menu.model`)
 
@@ -175,8 +207,9 @@ result = display.present(frame)
 └────────────────────────────────────────────────┘
 ```
 
-**입력:** 키보드 입력을 받지 않는다. 오직 화면의 버튼/엔코더 위젯만 입력원이다.
-(이것이 실제 물리 버튼을 시뮬레이션하는 인터페이스이므로.)
+**입력:** 키보드 입력을 받지 않는다. 오직 `TkinterSource`(창의 마우스 버튼/엔코더
+위젯)가 InputEvent를 만들어 메뉴에 보낸다. 이것은 실제 물리 버튼을 시뮬레이션하는
+`InputSource` 약속의 첫 구현체이며, 나중에 `GpioSource`로 교체 가능하다 (4.1 참고).
 
 **갱신 루프:** `root.after()` 기반 단일 루프, 약 20fps(50ms).
 1. `model.tick(dt)` — 시간 기반 전이
@@ -217,15 +250,18 @@ GUI 자체(VfdDisplay + Tkinter)는 기존 `tests/python/test_twin.py` 패턴을
 src/mn12832l/
 ├── menu/
 │   ├── __init__.py
-│   ├── input.py       # InputEvent
-│   ├── model.py       # MenuModel, Screen
+│   ├── input.py       # InputEvent + InputSource 약속 (교체 가능 베이스)
+│   ├── model.py       # MenuModel, Screen (입력 부품 모름)
 │   ├── render.py      # draw_screen()
 │   ├── presenter.py   # VfdDisplay + DigitalTwinTransport 연결
+│   ├── tk_source.py   # TkinterSource (오늘의 입력 부품)
 │   └── app.py         # Tkinter 창 + 입력 루프
+│   # (나중) gpio_source.py  # GpioSource — 메뉴 수정 없이 끼워넣기
 ├── __main__ 형태로 `python -m mn12832l.menu` 진입점
 tests/python/
 ├── test_menu_model.py
-└── test_menu_render.py
+├── test_menu_render.py
+└── test_menu_input.py  # 가짜 InputSource로 메뉴 구동 (Tkinter 없이)
 Makefile
 └── menu 타깃 추가
 ```
@@ -237,3 +273,6 @@ Makefile
 3. 매 프레임 `DIGITAL TWIN: PASS`가 뜬다 (치팅 없는 고증 경로).
 4. 메뉴 모델 단위 테스트가 통과한다.
 5. `make all`에 새 테스트가 포함되어 기존 게이트와 함께 통과한다.
+6. **모듈 교체 가능성 검증:** 가짜 `InputSource`를 끼워 넣어 메뉴를 Tkinter
+   없이 구동하는 테스트가 통과한다. 이는 나중에 `GpioSource` 교체가 메뉴
+   수정 없이 됨을 보장한다.
