@@ -31,7 +31,7 @@ TOOL_SOURCES := \
 	tools/vfd_pin_twin.c \
 	tools/vfd_system_twin.c
 
-.PHONY: all characterize test test-font test-scan test-host-link test-python twin \
+.PHONY: all characterize test test-font test-scan test-host-link test-python twin menu \
 	test-twin-unit test-pin-twin test-system-twin \
 	test-delay test-contracts test-dependencies \
 	warnings warnings-core warnings-board warnings-tools analyze clean
@@ -123,6 +123,10 @@ test-system-twin: $(BUILD_DIR)/vfd_system_twin
 twin: $(BUILD_DIR)/vfd_system_twin
 	PYTHONPATH=src MN12832L_SYSTEM_TWIN=$(CURDIR)/$(BUILD_DIR)/vfd_system_twin \
 		$(PYTHON) -m mn12832l.twin $(TWIN_ARGS)
+
+menu: $(BUILD_DIR)/vfd_system_twin
+	PYTHONPATH=src MN12832L_SYSTEM_TWIN=$(CURDIR)/$(BUILD_DIR)/vfd_system_twin \
+		$(PYTHON) -m mn12832l.menu
 
 test-delay: $(BUILD_DIR)/vfd_delay_arm.s $(TEST_DIR)/check_delay_codegen.py
 	$(PYTHON) $(TEST_DIR)/check_delay_codegen.py $(BUILD_DIR)/vfd_delay_arm.s
