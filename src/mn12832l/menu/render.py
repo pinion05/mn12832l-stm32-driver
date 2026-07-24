@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from functools import lru_cache
 from importlib import resources
 
@@ -19,12 +20,21 @@ _MAIN_ITEMS = ["MUSIC PLAYER", "MINI GAME", "SETTINGS"]
 def _font(size: int = 8) -> ImageFont.ImageFont:
     """패키지에 든 Galmuri7.ttf를 importlib.resources로 로드 (wheel/zipapp 호환).
 
-    twin.py의 load_ascii_art_asset과 동일한 자산 로딩 방식으로 통일.
+    assets는 mn12832l 패키지 루트에 있으므로 상위 디렉토리 순회(joinpath('..')) 없이
+    'mn12832l'에서 직접 참조한다 — joinpath('..')는 zipapp/zipimport 안에서
+    정규화되지 않아 실패한다.
+
+    리소스를 read_bytes()로 읽어 io.BytesIO에 담아 Pillow에 전달한다. 이 방식은
+    (1) str(Traversable)이 실제 파일 경로가 아니라 zip 안 경로라 ImageFont.truetype
+    이 못 여는 문제를 피하고, (2) as_file() 컨텍스트 매니저의 임시 파일 수명 문제를
+    회피하면서 @lru_cache를 유지할 수 있게 한다 (BytesIO는 seek(0) 후 재사용 가능).
     """
     try:
-        font_path = resources.files(__package__).joinpath("..").joinpath("assets").joinpath("Galmuri7.ttf")
-        return ImageFont.truetype(str(font_path), size)
-    except (OSError, IOError):
+        data = resources.files("mn12832l").joinpath(
+            "assets", "Galmuri7.ttf"
+        ).read_bytes()
+        return ImageFont.truetype(io.BytesIO(data), size)
+    except (OSError, IOError, FileNotFoundError):
         return ImageFont.load_default()
 
 
