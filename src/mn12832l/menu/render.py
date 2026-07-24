@@ -7,6 +7,7 @@ from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
 
+from ..protocol import FRAME_HEIGHT, FRAME_WIDTH
 from ..renderer import MvlsbRenderer
 from ..twin import load_ascii_art_asset
 from .model import Screen, ScreenKind
@@ -25,17 +26,15 @@ def _font(size: int = 8) -> ImageFont.ImageFont:
 
 
 def _draw_wordmark(draw: ImageDraw.ImageDraw) -> None:
-    """패키지에 든 FLOPPYBIRD 워드마크(ASCII 아트)를 128×32 중앙에 그린다.
+    """패키지에 든 FLOPPYBIRD 워드마크(ASCII 아트)를 상단 중앙에 그린다.
 
-    에셋은 41×7 픽셀. 화면 한가운데(scale=3)에 오도록 origin을 계산한다.
-    남은 하단 공간에 'v1.0' 텍스트를 함께 표시한다.
+    에셋은 41×7 픽셀. scale=2(82×14)로 그린다.
     """
     rows = load_ascii_art_asset()
-    scale = 3
+    scale = 2
     width = len(rows[0]) * scale
-    height = len(rows) * scale
-    origin_x = (128 - width) // 2
-    origin_y = (32 - height) // 2 - 3  # v1.0 텍스트 공간 확보
+    origin_x = (FRAME_WIDTH - width) // 2
+    origin_y = 2
     for row_index, row in enumerate(rows):
         for column_index, pixel in enumerate(row):
             if pixel != "#":
@@ -48,6 +47,23 @@ def _draw_wordmark(draw: ImageDraw.ImageDraw) -> None:
             )
 
 
+def _draw_loading_bar(draw: ImageDraw.ImageDraw, step: int) -> None:
+    """워드마크 아래에 움직이는 스캔바를 그린다 (패키지 로딩 애니메이션 재사용).
+
+    바 영역은 y=20~24. 바 안을 채우는 세로선이 step에 따라 좌→우로 순환한다.
+    """
+    bar_left = 20
+    bar_right = FRAME_WIDTH - 21
+    bar_top = 20
+    bar_bottom = 24
+    draw.rectangle((bar_left, bar_top, bar_right, bar_bottom), outline=1)
+    inner_left = bar_left + 1
+    inner_width = bar_right - bar_left - 1
+    for offset in range(18):
+        x = inner_left + (step + offset) % inner_width
+        draw.line((x, bar_top + 2, x, bar_bottom - 2), fill=1)
+
+
 def draw_screen(screen: Screen, renderer: MvlsbRenderer) -> bytes:
     """Screen 데이터를 framebuffer에 그리고 512바이트 snapshot 반환."""
     image = Image.new("1", (128, 32), 0)
@@ -55,24 +71,28 @@ def draw_screen(screen: Screen, renderer: MvlsbRenderer) -> bytes:
     font = _font(8)
 
     if screen.kind is ScreenKind.BOOT:
+        # 패키지 로딩 애니메이션: 워드마크(정적) + 스캔바(좌→우 순환).
+        # step은 boot_elapsed(초)를 100fps로 변환 — 기본 20fps의 5배속.
+        step = int(screen.boot_elapsed * 100)
         _draw_wordmark(draw)
-        draw.text((54, 26), "v1.0", font=font, fill=1)
+        _draw_loading_bar(draw, step)
     elif screen.kind is ScreenKind.MAIN_MENU:
+        # 항목 3개를 y=3/12/21에 배치 → 폰트(8px) 포함 y~29, 바닥 여백 2확보
         for i, label in enumerate(_MAIN_ITEMS):
-            y = i * 10
+            y = 3 + i * 9
             marker = ">" if i == screen.index else " "
-            draw.text((0, y), f"{marker} {label}", font=font, fill=1)
+            draw.text((1, y), f"{marker} {label}", font=font, fill=1)
     elif screen.kind is ScreenKind.MUSIC:
-        draw.text((0, 0), "NOW PLAYING", font=font, fill=1)
-        draw.text((0, 12), "TRACK 01", font=font, fill=1)
-        # 재생바 50% (스펙 4.3 — y=24)
-        draw.rectangle([0, 24, 127, 28], outline=1, fill=0)  # 전체 테두리
-        draw.rectangle([0, 24, 63, 28], outline=1, fill=1)   # 왼쪽 절반 채움
+        draw.text((1, 2), "NOW PLAYING", font=font, fill=1)
+        draw.text((1, 12), "TRACK 01", font=font, fill=1)
+        # 재생바 50% — 양끝 1px 여백 (스펙 4.3 — y=24)
+        draw.rectangle([1, 24, 126, 28], outline=1, fill=0)  # 전체 테두리
+        draw.rectangle([1, 24, 63, 28], outline=1, fill=1)   # 왼쪽 절반 채움
     elif screen.kind is ScreenKind.GAME:
-        draw.text((0, 12), "COMING SOON", font=font, fill=1)
+        draw.text((1, 12), "COMING SOON", font=font, fill=1)
     elif screen.kind is ScreenKind.SETTINGS:
-        draw.text((0, 0), "BRIGHTNESS 50%", font=font, fill=1)
-        draw.text((0, 12), "CONTRAST 50%", font=font, fill=1)
+        draw.text((1, 2), "BRIGHTNESS 50%", font=font, fill=1)
+        draw.text((1, 12), "CONTRAST 50%", font=font, fill=1)
 
     renderer.load_image(image)
     return renderer.snapshot()
