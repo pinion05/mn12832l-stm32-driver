@@ -28,7 +28,8 @@ class DrawScreenTests(unittest.TestCase):
 
     def test_non_empty_screen_has_at_least_one_pixel(self) -> None:
         frame = self._frame(Screen(ScreenKind.BOOT))
-        self.assertIn(1, frame, "BOOT should draw something")
+        # 0이 아닌 바이트가 하나라도 있어야 "뭔가 그려짐"
+        self.assertTrue(any(b != 0 for b in frame), "BOOT should draw something")
 
     def test_main_menu_selection_marker_moves_with_index(self) -> None:
         """인덱스 0/1/2일 때 ▶ 표시 위치가 달라야 한다."""
