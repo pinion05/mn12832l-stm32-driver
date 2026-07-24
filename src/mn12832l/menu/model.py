@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 from .input import ENCODER_CLICK, ENCODER_ROTATE_CCW, ENCODER_ROTATE_CW, BTN4, InputEvent
+from .items import MENU_ITEM_COUNT
 
 _BOOT_DURATION = 2.0
-_MAIN_ITEMS = 3  # MUSIC, GAME, SETTINGS
 
 
 class ScreenKind(Enum):
@@ -48,9 +48,9 @@ class MenuModel:
 
     def _handle_main(self, event: InputEvent) -> None:
         if event is ENCODER_ROTATE_CW:
-            self._index = (self._index + 1) % _MAIN_ITEMS
+            self._index = (self._index + 1) % MENU_ITEM_COUNT
         elif event is ENCODER_ROTATE_CCW:
-            self._index = (self._index - 1) % _MAIN_ITEMS
+            self._index = (self._index - 1) % MENU_ITEM_COUNT
         elif event is ENCODER_CLICK:
             self._kind = _MAIN_TARGETS[self._index]
 

@@ -4,7 +4,7 @@ import os
 import unittest
 
 from mn12832l.display import VfdDisplay
-from mn12832l.protocol import AckStatus, decode_ack, encode_frame
+from mn12832l.protocol import FRAME_BYTES, AckStatus, decode_ack, encode_frame
 from mn12832l.renderer import MvlsbRenderer
 from mn12832l.transport import SubprocessTransport
 
@@ -20,8 +20,8 @@ class CrossLanguageTests(unittest.TestCase):
         display = VfdDisplay(self.transport, renderer=MvlsbRenderer())
 
         with display:
-            first = display.present(bytes(512))
-            second = display.present(bytes([0xA5]) * 512)
+            first = display.present(bytes(FRAME_BYTES))
+            second = display.present(bytes([0xA5]) * FRAME_BYTES)
 
         self.assertEqual(first.sequence, 0)
         self.assertEqual(second.sequence, 1)
@@ -29,7 +29,7 @@ class CrossLanguageTests(unittest.TestCase):
         self.assertEqual(second.attempts, 1)
 
     def test_c_receiver_rejects_python_packet_corruption(self) -> None:
-        packet = bytearray(encode_frame(bytes(512), sequence=33))
+        packet = bytearray(encode_frame(bytes(FRAME_BYTES), sequence=33))
         packet[200] ^= 0x01
 
         self.transport.open()

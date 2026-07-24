@@ -23,6 +23,26 @@ ACK_PACKET_BYTES = 9
 BytesLike = Union[bytes, bytearray, memoryview]
 
 
+# --- MVLSB 픽셀 ↔ 바이트 변환 헬퍼 ---
+# 코드 리뷰 CODE_REVIEW_20260724_0850 §1.5: 이 공식이 6~7곳에 중복됐던 것을
+# 단일 소스로 통합. (y // 8) * FRAME_WIDTH + x 의 인덱스와 1 << (y % 8)의 비트 마스크.
+
+
+def pixel_byte_index(x: int, y: int) -> int:
+    """MVLSB 레이아웃에서 픽셀 (x, y)가 들어 있는 바이트 인덱스."""
+    return (y // 8) * FRAME_WIDTH + x
+
+
+def pixel_bit_mask(y: int) -> int:
+    """MVLSB 레이아웃에서 픽셀 (x, y)에 해당하는 비트 마스크."""
+    return 1 << (y % 8)
+
+
+def pixel_is_on(frame: BytesLike, x: int, y: int) -> bool:
+    """MVLSB 프레임에서 픽셀 (x, y)가 켜져 있는지."""
+    return bool(frame[pixel_byte_index(x, y)] & pixel_bit_mask(y))
+
+
 class ProtocolError(ValueError):
     """Raised when a wire packet violates the protocol contract."""
 
