@@ -27,4 +27,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-mn12832l = ["assets/*.txt"]
+mn12832l = ["assets/*.txt", "assets/*.ttf"]

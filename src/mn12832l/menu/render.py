@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
+from importlib import resources
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -14,13 +14,16 @@ from .model import Screen, ScreenKind
 
 _MAIN_ITEMS = ["MUSIC PLAYER", "MINI GAME", "SETTINGS"]
 
-_FONT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "Galmuri7.ttf")
-
 
 @lru_cache(maxsize=4)
 def _font(size: int = 8) -> ImageFont.ImageFont:
+    """패키지에 든 Galmuri7.ttf를 importlib.resources로 로드 (wheel/zipapp 호환).
+
+    twin.py의 load_ascii_art_asset과 동일한 자산 로딩 방식으로 통일.
+    """
     try:
-        return ImageFont.truetype(_FONT_PATH, size)
+        font_path = resources.files(__package__).joinpath("..").joinpath("assets").joinpath("Galmuri7.ttf")
+        return ImageFont.truetype(str(font_path), size)
     except (OSError, IOError):
         return ImageFont.load_default()
 
