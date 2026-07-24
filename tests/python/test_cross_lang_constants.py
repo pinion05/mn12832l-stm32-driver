@@ -201,18 +201,63 @@ class CrossLangPinEventCodesTests(unittest.TestCase):
                 )
 
 
+def _extract_c_trace_header(c_source: str) -> bytes | None:
+    """C 소스에서 핀 트레이스 헤더(VFDTPIN1)를 추출.
+
+    C 구현에 따라 헤더는 두 형태로 정의될 수 있다:
+      1. 문자열 리터럴: ``"VFDTPIN1"``
+      2. uint8_t 문자 배열: ``static const uint8_t header[8] = {
+        'V', 'F', 'D', 'T', 'P', 'I', 'N', '1', };``
+
+    어느 형태든 잡아내야 guard가 유효하다. 매칭 실패 시 None 반환.
+    """
+    # 1) 문자열 리터럴: "VFDTPIN1"
+    m = re.search(r'"(VFDTPIN\d)"', c_source)
+    if m:
+        return m.group(1).encode("ascii")
+
+    # 2) uint8_t 문자 배열: 식별자 'header'를 가진 배열 이니셜라이저에서
+    #    연속된 문자 리터럴들을 추출. 임의의 다른 문자 리터럴에 오염되지
+    #    않도록 배열 선언(header[N] = { ... }) 영역만 검사한다.
+    m = re.search(
+        r"\bheader\s*\[\s*\d*\s*\]\s*=\s*\{([^}]*)\}",
+        c_source,
+    )
+    if m:
+        body = m.group(1)
+        chars = re.findall(r"'([ -~])'", body)  # ASCII 출력 문자 1개
+        if chars:
+            return "".join(chars).encode("ascii")
+
+    return None
+
+
 class CrossLangTraceHeaderTests(unittest.TestCase):
     """§1.4: 핀 트레이스 헤더 문자열 'VFDTPIN1'."""
 
     def test_trace_header(self) -> None:
+        """C 헤더 정의가 반드시 발견·검증되어야 함 (거짓 통과 방지).
+
+        이전에는 ``re.search(r'"(VFDTPIN\\d)"', ...)`` 가 문자열 리터럴만
+        매칭했는데, C 헤더가 ``uint8_t header[8] = {'V','F',...}`` 문자 배열로
+        정의된 경우 매칭이 안 되어 ``if m:`` 블록을 건너뛰고 조용히 통과했다.
+        이제 헤더 추출이 None이면 명시적으로 실패하여 guard가 실제로
+        동작함을 보장한다.
+        """
         pin_trace_c = (_TOOLS_DIR / "vfd_pin_trace.c").read_text()
-        # C에서 헤더는 배열 리터럴 또는 fwrite 문자열
-        m = re.search(r'"(VFDTPIN\d)"', pin_trace_c)
-        if m:
-            self.assertEqual(
-                m.group(1).encode("ascii"), twin.TRACE_HEADER,
-                "핀 트레이스 헤더 문자열 불일치",
-            )
+        # C 헤더는 문자열 리터럴("VFDTPIN1") 또는 uint8_t 문자 배열
+        # ('V','F',...) 어느 형태든 추출해야 함. 매칭 실패 시 거짓 통과가
+        # 되므로 명시적으로 실패한다.
+        c_header = _extract_c_trace_header(pin_trace_c)
+        self.assertIsNotNone(
+            c_header,
+            "C 핀 트레이스 헤더 정의를 찾을 수 없음 — guard가 아무것도 검증하지 않음",
+        )
+        assert c_header is not None  # 타입 좁히기 (mypy)
+        self.assertEqual(
+            c_header, twin.TRACE_HEADER,
+            f"핀 트레이스 헤더 불일치 (C={c_header!r}, Py={twin.TRACE_HEADER!r})",
+        )
 
 
 if __name__ == "__main__":
