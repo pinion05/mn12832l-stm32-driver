@@ -1,5 +1,12 @@
+import io
+import os
+import sys
+import tempfile
 import unittest
+import zipfile
 from typing import Optional, Tuple
+
+from PIL import ImageFont
 
 from mn12832l.menu.model import MenuModel, Screen, ScreenKind
 from mn12832l.menu.render import draw_screen
@@ -154,6 +161,176 @@ class DrawScreenTests(unittest.TestCase):
         self.assertEqual(music, self._frame(Screen(ScreenKind.MUSIC)))
         self.assertEqual(game, self._frame(Screen(ScreenKind.GAME)))
         self.assertEqual(settings, self._frame(Screen(ScreenKind.SETTINGS)))
+
+
+def _build_package_zip() -> str:
+    """src/mn12832l 패키지 전체를 zip으로 묶어 임시 경로 반환 (zipimport 시뮬레이션).
+
+    zipapp/zipimport 환경에서 폰트가 진짜 로드되는지 검증하기 위한 픽스처.
+    """
+    src_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "src")
+    )
+    pkg_root = os.path.join(src_root, "mn12832l")
+    fd, zip_path = tempfile.mkstemp(suffix=".zip", prefix="mn12832l_test_")
+    os.close(fd)
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, _dirs, files in os.walk(pkg_root):
+            for fn in files:
+                # __pycache__는 zip에 넣을 필요 없음
+                if "__pycache__" in root:
+                    continue
+                full = os.path.join(root, fn)
+                arc = os.path.relpath(full, src_root)
+                z.write(full, arc)
+    return zip_path
+
+
+class FontLoadTests(unittest.TestCase):
+    """Galmuri7 폰트 로딩 검증 — importlib.resources 결함 회귀 방지.
+
+    PR #3의 Codex P2 리뷰 대응: joinpath('..')는 zipimport에서 정규화되지 않고
+    str(Traversable)은 실제 파일 경로가 아니므로 zipped 설치 시 폰트가
+    조용히 load_default()로 폴백하는 결함이 있었다.
+
+    주의: Pillow 12+에서 load_default()도 FreeTypeFont를 반환하므로 타입 이름
+    검사만으로는 폴백을 잡을 수 없다. 따라서 폰트 리소스가 zip 환경에서
+    read_bytes()로 실제로 읽히는지(=결함 코드는 실패, 올바른 코드는 성공)를
+    직접 검증한다.
+    """
+
+    def test_font_resource_readable_under_zipimport(self) -> None:
+        """zipimport 환경에서 폰트 리소스 경로가 read_bytes()로 읽혀야 한다.
+
+        결함(joinpath('..'))은 zip에서 이 읽기를 실패시킨다 — 그래서
+        ImageFont.truetype(str(fp))가 OSError를 내고 except가 삼켜 폴백한다.
+        올바른 구현(resources.files('mn12832l').joinpath('assets', name))은
+        zip에서도 읽힌다.
+        """
+        zip_path = _build_package_zip()
+        try:
+            sys.path.insert(0, zip_path)
+            for key in list(sys.modules):
+                if key == "mn12832l" or key.startswith("mn12832l."):
+                    del sys.modules[key]
+
+            import importlib
+
+            importlib.import_module("mn12832l")  # zip에서 로드 확인용
+            pkg_spec = importlib.util.find_spec("mn12832l")
+            self.assertIn(
+                zip_path,
+                getattr(pkg_spec, "origin", "") or "",
+                "test setup sanity: mn12832l should load from the zip",
+            )
+
+            # 올바른 경로('mn12832l'에서 직접)는 zip에서 읽혀야 한다.
+            from importlib import resources
+
+            fp = resources.files("mn12832l").joinpath("assets", "Galmuri7.ttf")
+            self.assertTrue(
+                fp.is_file(),
+                f"Galmuri7.ttf must be readable inside the zip (got {fp!r})",
+            )
+            data = fp.read_bytes()
+            # TTF 매직: 0x00010000 (TrueType) 또는 'OTTO' (OpenType/CFF)
+            self.assertIn(
+                data[:4],
+                (b"\x00\x01\x00\x00", b"OTTO"),
+                "read bytes should be a valid TrueType/OpenType font",
+            )
+        finally:
+            if zip_path in sys.path:
+                sys.path.remove(zip_path)
+            for key in list(sys.modules):
+                if key == "mn12832l" or key.startswith("mn12832l."):
+                    del sys.modules[key]
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
+
+    def test_font_loads_galmuri_not_default(self) -> None:
+        """_font()가 Galmuri7을 로드해야 한다 — 폴백이 아니다.
+
+        폰트 리소스를 bytes로 읽은 뒤 io.BytesIO로 ImageFont를 만든 결과와
+        _font()가 같은 폰트 객체(또는 동일 글리프 메트릭)를 반환하는지 비교하여
+        _font()가 load_default 폴백이 아닌 진짜 Galmuri7을 썼음을 보인다.
+        """
+        from mn12832l.menu.render import _font
+
+        _font.cache_clear()
+        font = _font(8)
+
+        # 동일 폰트를 직접 읽어 만든 기준 객체
+        from importlib import resources
+
+        data = resources.files("mn12832l").joinpath("assets", "Galmuri7.ttf").read_bytes()
+        reference = ImageFont.truetype(io.BytesIO(data), 8)
+
+        # getbbox는 폰트·size에 의존적 — 같은 폰트면 동일 메트릭
+        for probe in ("M", "g", "8", " "):
+            self.assertEqual(
+                font.getbbox(probe),
+                reference.getbbox(probe),
+                f"_font glyph metrics for {probe!r} must match Galmuri7 "
+                "(silent load_default fallback would differ)",
+            )
+
+    def test_font_loads_galmuri_under_zipimport(self) -> None:
+        """zipimport 환경에서도 _font()가 Galmuri7(폴백 아님)을 로드해야 한다.
+
+        현재 결함(joinpath('..') + str(Traversable))은 zipimport에서
+        ImageFont.truetype(str(fp))가 OSError를 내고 except가 삼켜
+        load_default()로 폴백한다. Pillow 12+에서 load_default도 FreeTypeFont를
+        반환하므로 타입 이름 비교로는 폴백을 못 잡는다 — 글리프 메트릭을 비교한다.
+        """
+        zip_path = _build_package_zip()
+        try:
+            sys.path.insert(0, zip_path)
+            for key in list(sys.modules):
+                if key == "mn12832l" or key.startswith("mn12832l."):
+                    del sys.modules[key]
+
+            import importlib
+
+            render_mod = importlib.import_module("mn12832l.menu.render")
+            pkg_spec = importlib.util.find_spec("mn12832l")
+            self.assertIn(
+                zip_path,
+                getattr(pkg_spec, "origin", "") or "",
+                "test setup sanity: mn12832l should load from the zip",
+            )
+
+            render_mod._font.cache_clear()
+            font = render_mod._font(8)
+
+            # zip 안의 폰트 바이트를 직접 읽어 기준 객체 생성
+            from importlib import resources
+
+            data = resources.files("mn12832l").joinpath(
+                "assets", "Galmuri7.ttf"
+            ).read_bytes()
+            reference = ImageFont.truetype(io.BytesIO(data), 8)
+
+            for probe in ("M", "g", "8", " "):
+                self.assertEqual(
+                    font.getbbox(probe),
+                    reference.getbbox(probe),
+                    f"under zipimport, _font glyph metrics for {probe!r} must "
+                    "match Galmuri7 — silent load_default fallback regressed "
+                    "(joinpath('..')/str(Traversable) bug)",
+                )
+        finally:
+            if zip_path in sys.path:
+                sys.path.remove(zip_path)
+            for key in list(sys.modules):
+                if key == "mn12832l" or key.startswith("mn12832l."):
+                    del sys.modules[key]
+            try:
+                os.remove(zip_path)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":
