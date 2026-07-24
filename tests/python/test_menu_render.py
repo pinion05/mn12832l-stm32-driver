@@ -216,6 +216,9 @@ class FontLoadTests(unittest.TestCase):
 
             import importlib
 
+
+            import importlib.util
+
             importlib.import_module("mn12832l")  # zip에서 로드 확인용
             pkg_spec = importlib.util.find_spec("mn12832l")
             self.assertIn(
@@ -293,6 +296,9 @@ class FontLoadTests(unittest.TestCase):
                     del sys.modules[key]
 
             import importlib
+
+
+            import importlib.util
 
             render_mod = importlib.import_module("mn12832l.menu.render")
             pkg_spec = importlib.util.find_spec("mn12832l")

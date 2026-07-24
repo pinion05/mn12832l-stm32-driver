@@ -30,11 +30,14 @@ def _font(size: int = 8) -> ImageFont.ImageFont:
     회피하면서 @lru_cache를 유지할 수 있게 한다 (BytesIO는 seek(0) 후 재사용 가능).
     """
     try:
+        # joinpath를 체인으로 넘긴다 — Python 3.9 zipimport에서
+        # zipfile.Path.joinpath가 인자를 하나만 받으므로 묶어 넘기면 TypeError가 난다.
         data = resources.files("mn12832l").joinpath(
-            "assets", "Galmuri7.ttf"
-        ).read_bytes()
+            "assets"
+        ).joinpath("Galmuri7.ttf").read_bytes()
         return ImageFont.truetype(io.BytesIO(data), size)
-    except (OSError, IOError, FileNotFoundError):
+    except OSError:
+        # IOError/FileNotFoundError는 OSError의 별칭/하위 클래스라 하나로 충분.
         return ImageFont.load_default()
 
 
