@@ -26,6 +26,7 @@ from .protocol import (
     AckStatus,
     ProtocolError,
     decode_ack,
+    pixel_is_on as _pixel,
 )
 from .renderer import MvlsbRenderer
 from .transport import CommandPart, SubprocessTransport, TransportError
@@ -363,10 +364,6 @@ def run_digital_twin(
             f"pin twin exited with {completed.returncode}: {detail or 'no detail'}"
         )
     return decode_pin_trace(completed.stdout, source_frame=frame)
-
-
-def _pixel(frame: bytes, x: int, y: int) -> bool:
-    return bool(frame[(y // 8) * FRAME_WIDTH + x] & (1 << (y % 8)))
 
 
 def _half_block_rows(frame: bytes) -> List[str]:

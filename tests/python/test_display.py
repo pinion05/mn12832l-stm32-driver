@@ -7,7 +7,7 @@ from mn12832l.display import (
     FrameRejectedError,
     VfdDisplay,
 )
-from mn12832l.protocol import AckStatus, encode_ack
+from mn12832l.protocol import FRAME_BYTES, AckStatus, encode_ack
 from mn12832l.renderer import MvlsbRenderer
 
 
@@ -61,7 +61,7 @@ class DisplayTests(unittest.TestCase):
     def test_unchanged_frame_is_not_sent_twice(self) -> None:
         transport = RecordingTransport()
         display = VfdDisplay(transport, renderer=MvlsbRenderer())
-        frame = bytes(512)
+        frame = bytes(FRAME_BYTES)
 
         with display:
             first = display.present(frame)
@@ -75,7 +75,7 @@ class DisplayTests(unittest.TestCase):
     def test_reopening_resends_state_after_possible_mcu_reset(self) -> None:
         transport = RecordingTransport()
         display = VfdDisplay(transport, renderer=MvlsbRenderer())
-        frame = bytes([0x33]) * 512
+        frame = bytes([0x33]) * FRAME_BYTES
 
         with display:
             first = display.present(frame)
@@ -98,7 +98,7 @@ class DisplayTests(unittest.TestCase):
         )
 
         with display:
-            result = display.present(bytes([0xA5]) * 512)
+            result = display.present(bytes([0xA5]) * FRAME_BYTES)
 
         self.assertEqual(result.attempts, 2)
         self.assertEqual(
@@ -117,8 +117,8 @@ class DisplayTests(unittest.TestCase):
 
         with display:
             with self.assertRaises(FrameRejectedError):
-                display.present(bytes([1]) * 512)
-            result = display.present(bytes([1]) * 512)
+                display.present(bytes([1]) * FRAME_BYTES)
+            result = display.present(bytes([1]) * FRAME_BYTES)
 
         self.assertEqual(result.sequence, 0)
         self.assertEqual(len(transport.packets), 2)
@@ -127,7 +127,7 @@ class DisplayTests(unittest.TestCase):
         display = VfdDisplay(RecordingTransport(), renderer=MvlsbRenderer())
 
         with self.assertRaises(DisplayClosedError):
-            display.present(bytes(512))
+            display.present(bytes(FRAME_BYTES))
 
         with display, self.assertRaises(ValueError):
             display.present(bytes(511))

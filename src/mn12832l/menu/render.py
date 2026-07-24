@@ -11,9 +11,8 @@ from PIL import Image, ImageDraw, ImageFont
 from ..protocol import FRAME_HEIGHT, FRAME_WIDTH
 from ..renderer import MvlsbRenderer
 from ..twin import load_ascii_art_asset
+from .items import MENU_ITEMS as _MAIN_ITEMS
 from .model import Screen, ScreenKind
-
-_MAIN_ITEMS = ["MUSIC PLAYER", "MINI GAME", "SETTINGS"]
 
 
 @lru_cache(maxsize=4)

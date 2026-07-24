@@ -6,14 +6,14 @@ import time
 import tkinter as tk
 from typing import Optional
 
+from ..protocol import FRAME_HEIGHT as _HEIGHT
+from ..protocol import FRAME_WIDTH as _WIDTH
 from .input import BTN1, BTN2, BTN3, BTN4, ENCODER_ROTATE_CCW, ENCODER_ROTATE_CW
 from .model import MenuModel
 from .presenter import MenuPresenter
 from .tk_source import TkinterSource
 
 _SCALE = 6  # 128×32 → 768×192
-_WIDTH = 128
-_HEIGHT = 32
 _FPS_MS = 50  # 20fps
 
 _VFD_ON = "#33ffcc"

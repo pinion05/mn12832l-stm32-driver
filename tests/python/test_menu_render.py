@@ -10,11 +10,10 @@ from PIL import ImageFont
 
 from mn12832l.menu.model import MenuModel, Screen, ScreenKind
 from mn12832l.menu.render import draw_screen
+from mn12832l.protocol import FRAME_HEIGHT as _HEIGHT
+from mn12832l.protocol import FRAME_WIDTH as _WIDTH
+from mn12832l.protocol import pixel_is_on
 from mn12832l.renderer import MvlsbRenderer
-
-# VFD 물리 프레임 크기 (protocol.py의 FRAME_WIDTH/FRAME_HEIGHT와 동일)
-_WIDTH = 128
-_HEIGHT = 32
 
 
 class DrawScreenTests(unittest.TestCase):
@@ -31,7 +30,7 @@ class DrawScreenTests(unittest.TestCase):
         x_max = y_max = -1
         for y in range(_HEIGHT):
             for x in range(_WIDTH):
-                if frame[(y // 8) * _WIDTH + x] & (1 << (y % 8)):
+                if pixel_is_on(frame, x, y):
                     if x < x_min:
                         x_min = x
                     if x > x_max:

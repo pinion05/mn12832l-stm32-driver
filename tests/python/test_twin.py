@@ -7,7 +7,14 @@ import sys
 import unittest
 
 from mn12832l.display import VfdDisplay
-from mn12832l.protocol import AckStatus, decode_ack, encode_frame
+from mn12832l.protocol import (
+    FRAME_BYTES,
+    FRAME_WIDTH,
+    AckStatus,
+    decode_ack,
+    encode_frame,
+)
+from mn12832l.protocol import pixel_is_on as _pixel
 from mn12832l.twin import (
     DigitalTwinError,
     DigitalTwinTransport,
@@ -19,10 +26,6 @@ from mn12832l.twin import (
     render_tui,
     run_digital_twin,
 )
-
-
-def _pixel(frame: bytes, x: int, y: int) -> bool:
-    return bool(frame[(y // 8) * 128 + x] & (1 << (y % 8)))
 
 
 class _InteractiveBuffer(io.StringIO):
@@ -62,7 +65,7 @@ class DigitalTwinUnitTests(unittest.TestCase):
         corner_frame = render_border_loader_frame(0)
         top_frame = render_border_loader_frame(64)
 
-        self.assertEqual(len(corner_frame), 512)
+        self.assertEqual(len(corner_frame), FRAME_BYTES)
         self.assertTrue(_pixel(corner_frame, 1, 1))
         self.assertFalse(_pixel(top_frame, 1, 1))
         self.assertTrue(_pixel(top_frame, 64, 1))
@@ -91,7 +94,7 @@ class PinTwinIntegrationTests(unittest.TestCase):
         self.engine = engine
 
     def test_c_pin_trace_round_trips_every_frame_bit(self) -> None:
-        frame = bytes((index * 37 + 11) & 0xFF for index in range(512))
+        frame = bytes((index * 37 + 11) & 0xFF for index in range(FRAME_BYTES))
 
         result = run_digital_twin(frame, self.engine)
 
@@ -105,7 +108,7 @@ class PinTwinIntegrationTests(unittest.TestCase):
         self.assertTrue(result.matches_source)
 
     def test_tui_renders_reconstructed_pixels_and_pin_summary(self) -> None:
-        frame = bytearray(512)
+        frame = bytearray(FRAME_BYTES)
         frame[0] = 0x01
         frame[127] = 0x80
         frame[511] = 0x80
@@ -130,7 +133,7 @@ class PinTwinIntegrationTests(unittest.TestCase):
     def test_decoder_rejects_an_unsafe_virtual_pin_shutdown(self) -> None:
         completed = subprocess.run(
             [self.engine],
-            input=bytes(512),
+            input=bytes(FRAME_BYTES),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
@@ -147,7 +150,7 @@ class PinTwinIntegrationTests(unittest.TestCase):
     def test_decoder_rejects_pin_output_that_differs_from_source(self) -> None:
         completed = subprocess.run(
             [self.engine],
-            input=bytes(512),
+            input=bytes(FRAME_BYTES),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
@@ -160,7 +163,7 @@ class PinTwinIntegrationTests(unittest.TestCase):
         trace[first_phase + 3] = 1
 
         with self.assertRaisesRegex(DigitalTwinError, "does not match"):
-            decode_pin_trace(bytes(trace), source_frame=bytes(512))
+            decode_pin_trace(bytes(trace), source_frame=bytes(FRAME_BYTES))
 
 
 class SystemTwinEndToEndTests(unittest.TestCase):
@@ -195,7 +198,7 @@ class SystemTwinEndToEndTests(unittest.TestCase):
 
     def test_system_twin_nacks_corruption_without_rendering_stale_output(self) -> None:
         transport = DigitalTwinTransport([self.engine], timeout=2.0)
-        packet = bytearray(encode_frame(bytes(512), sequence=33))
+        packet = bytearray(encode_frame(bytes(FRAME_BYTES), sequence=33))
         packet[200] ^= 0x01
 
         transport.open()

@@ -4,6 +4,7 @@ import unittest
 
 from PIL import Image, ImageDraw
 
+from mn12832l.protocol import FRAME_BYTES
 from mn12832l.renderer import MvlsbRenderer
 
 
@@ -22,7 +23,7 @@ class RendererTests(unittest.TestCase):
                 renderer.clear()
                 renderer.framebuffer.pixel(x, y, 1)
                 frame = renderer.snapshot()
-                self.assertEqual(len(frame), 512)
+                self.assertEqual(len(frame), FRAME_BYTES)
                 self.assertEqual(frame[byte_index], mask)
                 self.assertEqual(sum(value != 0 for value in frame), 1)
 
